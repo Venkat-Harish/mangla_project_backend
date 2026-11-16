@@ -1,0 +1,552 @@
+[
+  {
+    "name": "MK's Bake Studio",
+    "owner": "Mouni K",
+    "phones": [
+      "+917993753928"
+    ],
+    "menu": [
+      {
+        "name": "Cake Pop",
+        "desc": "Per piece",
+        "price": 60
+      },
+      {
+        "name": "Caramel Brownie",
+        "desc": "Per piece",
+        "price": 90
+      },
+      {
+        "name": "Mini Cupcakes",
+        "desc": "Box of 6",
+        "price": 240
+      },
+      {
+        "name": "Cupcakes",
+        "desc": "Box of 4",
+        "price": 280
+      },
+      {
+        "name": "Cakesicle",
+        "desc": "Per piece",
+        "price": 80
+      },
+      {
+        "name": "Choco Chip Cookie (Cookieman style)",
+        "desc": "Per piece",
+        "price": 80
+      },
+      {
+        "name": "Cookie with Jam",
+        "desc": "Box of 6",
+        "price": 150
+      },
+      {
+        "name": "Biscoff Cupcake",
+        "desc": "Per piece",
+        "price": 90
+      }
+    ]
+  },
+  {
+    "name": "Yummy Food",
+    "owner": "Yaminee Sowri",
+    "phones": [
+      "+919642096060",
+      "+918008265601"
+    ],
+    "menu": [
+      {
+        "name": "Sprouted Ragi Dosa Batter",
+        "desc": "1 kg · Sprouted batter",
+        "price": 150
+      },
+      {
+        "name": "Multigrain Dosa Batter",
+        "desc": "1 kg · Sprouted batter",
+        "price": 160
+      },
+      {
+        "name": "Sprouted Jowar Dosa Batter",
+        "desc": "1 kg · Sprouted batter",
+        "price": 160
+      },
+      {
+        "name": "Idly Batter",
+        "desc": "1 kg · Regular batter",
+        "price": 90
+      },
+      {
+        "name": "Dosa Batter",
+        "desc": "1 kg · Regular batter",
+        "price": 90
+      },
+      {
+        "name": "Ragi Idly Batter",
+        "desc": "1 kg · Millet batter",
+        "price": 130
+      },
+      {
+        "name": "Ragi Dosa Batter",
+        "desc": "1 kg · Millet batter",
+        "price": 130
+      },
+      {
+        "name": "Jowar Idly Batter",
+        "desc": "1 kg · Millet batter",
+        "price": 140
+      },
+      {
+        "name": "Jowar Dosa Batter",
+        "desc": "1 kg · Millet batter · Most selling!",
+        "price": 140
+      },
+      {
+        "name": "Vada Batter",
+        "desc": "1 kg · Pre-order 2 hours in advance",
+        "price": 150
+      },
+      {
+        "name": "Pesarattu Batter",
+        "desc": "1 kg · Pre-order 7 hours in advance",
+        "price": 150
+      },
+      {
+        "name": "Roti (10 pieces)",
+        "desc": "Ready to cook · Homemade",
+        "price": 100
+      },
+      {
+        "name": "Poori (10 pieces)",
+        "desc": "Ready to cook · Homemade",
+        "price": 100
+      }
+    ]
+  },
+  {
+    "name": "Smriti's Kitchen",
+    "owner": "Smriti",
+    "phones": [
+      "+917675800115"
+    ],
+    "menu": [
+      {
+        "name": "Pineapple Raita",
+        "desc": null,
+        "price": 80
+      },
+      {
+        "name": "Egg Curry with 3 Rotis",
+        "desc": null,
+        "price": 150
+      },
+      {
+        "name": "Lauki Kofta Curry with Jeera Rice",
+        "desc": null,
+        "price": 190
+      },
+      {
+        "name": "Tikki Chaat",
+        "desc": "250 ml box",
+        "price": 140
+      },
+      {
+        "name": "Rajma Chawal",
+        "desc": null,
+        "price": 170
+      },
+      {
+        "name": "Onion Curry with 3 Beetroot Parathas",
+        "desc": null,
+        "price": 180
+      }
+    ]
+  },
+  {
+    "name": "Aunty Kitchen",
+    "owner": "Vijaya Lakshmi C",
+    "phones": [
+      "+919491871484"
+    ],
+    "menu": [
+      {
+        "name": "Boneless Chicken Biryani",
+        "desc": null,
+        "price": 280
+      },
+      {
+        "name": "Boneless Fish Iguru",
+        "desc": null,
+        "price": 300
+      },
+      {
+        "name": "Mutton Dum Biryani",
+        "desc": null,
+        "price": 380
+      },
+      {
+        "name": "Moringa Chicken Fry",
+        "desc": null,
+        "price": 260
+      },
+      {
+        "name": "Chicken Fry",
+        "desc": null,
+        "price": 240
+      },
+      {
+        "name": "Chicken Pulav",
+        "desc": null,
+        "price": 220
+      }
+    ]
+  },
+  {
+    "name": "Yoat Bowl",
+    "owner": "Pallavi N",
+    "phones": [
+      "+918123014935"
+    ],
+    "menu": [
+      {
+        "name": "High Protein Yogurt Bowl",
+        "desc": "44–52 g protein",
+        "price": 350
+      },
+      {
+        "name": "Classic Oat Bowl",
+        "desc": "23–25 g protein",
+        "price": 150
+      },
+      {
+        "name": "Yogurt Bowl",
+        "desc": "20–26 g protein",
+        "price": 250
+      },
+      {
+        "name": "Protein Sandwich",
+        "desc": "20–24 g protein",
+        "price": 150
+      },
+      {
+        "name": "Extra: Black Raisins",
+        "desc": "Add to any bowl",
+        "price": 10
+      },
+      {
+        "name": "Extra: Peanut Butter",
+        "desc": "Add to any bowl",
+        "price": 25
+      },
+      {
+        "name": "Extra: Blueberries",
+        "desc": "Add to any bowl",
+        "price": 30
+      },
+      {
+        "name": "Extra: Whey",
+        "desc": "Add to any bowl · +24 g protein",
+        "price": 50
+      }
+    ]
+  },
+  {
+    "name": "The Real Food Co.",
+    "owner": "Sahithi G",
+    "phones": [
+      "+919550420545"
+    ],
+    "menu": [
+      {
+        "name": "Vegetable Chips",
+        "desc": "Snacks · 200 g · Most ordered",
+        "price": 299
+      },
+      {
+        "name": "Coconut Candy",
+        "desc": "Snacks · Pack · Most ordered",
+        "price": 199
+      },
+      {
+        "name": "Murukulu / Bundi / Chakralu",
+        "desc": "Snacks · Pack · Most ordered",
+        "price": 159
+      },
+      {
+        "name": "Taati Tandra",
+        "desc": "Snacks · 200 g",
+        "price": 149
+      },
+      {
+        "name": "Anjeer Tandra Roll",
+        "desc": "Snacks · 100 g · Most ordered",
+        "price": 199
+      },
+      {
+        "name": "Hemp Seeds",
+        "desc": "Snacks · 250 g",
+        "price": 249
+      },
+      {
+        "name": "Halim Seeds",
+        "desc": "Snacks · 250 g",
+        "price": 129
+      },
+      {
+        "name": "Multi Millet Noodles (with special masala seasoning)",
+        "desc": "Snacks · 250 g · Most ordered",
+        "price": 149
+      },
+      {
+        "name": "Multi Millet Mix Powder (27 varieties)",
+        "desc": "Snacks · 500 g",
+        "price": 229
+      },
+      {
+        "name": "Puffed Quinoa",
+        "desc": "Snacks · 250 g · Most ordered",
+        "price": 199
+      },
+      {
+        "name": "18 Sprouts Mix Protein Powder",
+        "desc": "Snacks · 500 g",
+        "price": 199
+      },
+      {
+        "name": "Rava Dosa / Minapa Dosa / Pesara Dosa / Jowar Dosa",
+        "desc": "Tiffins · Pack",
+        "price": 119
+      },
+      {
+        "name": "Protein Rich Upma Rawa (Whole Moong + Rice)",
+        "desc": "Tiffins · 500 g",
+        "price": 149
+      },
+      {
+        "name": "Multi Millet Vermicelli",
+        "desc": "Tiffins · 500 g · Most ordered",
+        "price": 149
+      },
+      {
+        "name": "Brown Rice Poha",
+        "desc": "Tiffins · 200 g",
+        "price": 89
+      },
+      {
+        "name": "Red Rice Poha",
+        "desc": "Tiffins · 200 g",
+        "price": 99
+      },
+      {
+        "name": "Multi Millet Poha",
+        "desc": "Tiffins · 250 g · Most ordered",
+        "price": 99
+      },
+      {
+        "name": "Millet Instant Dosa Mix",
+        "desc": "Tiffins · 500 g",
+        "price": 199
+      },
+      {
+        "name": "Bold Quinoa (Premium)",
+        "desc": "Tiffins · 1 kg",
+        "price": 279
+      },
+      {
+        "name": "Minapa (Urad Dal) Appadams",
+        "desc": "Appadams · Pack",
+        "price": 89
+      },
+      {
+        "name": "Pesara (Moong Dal) Appadams",
+        "desc": "Appadams · Pack",
+        "price": 89
+      },
+      {
+        "name": "Kandi (Toor Dal) Appadams",
+        "desc": "Appadams · Pack",
+        "price": 89
+      },
+      {
+        "name": "Masala Appadams",
+        "desc": "Appadams · Pack",
+        "price": 89
+      },
+      {
+        "name": "Minapa Pindi (Urad Dal)",
+        "desc": "Vadiyams · 100 g",
+        "price": 79
+      },
+      {
+        "name": "Pesara Pindi (Moong Dal)",
+        "desc": "Vadiyams · 100 g",
+        "price": 79
+      },
+      {
+        "name": "Gummidi (Ash Gourd)",
+        "desc": "Vadiyams · 100 g",
+        "price": 79
+      },
+      {
+        "name": "Saggubiyyam (Sabudana)",
+        "desc": "Vadiyams · 100 g",
+        "price": 79
+      },
+      {
+        "name": "Biyyampindi (Rice Flour)",
+        "desc": "Vadiyams · 200 g · Most ordered",
+        "price": 79
+      },
+      {
+        "name": "White Sesame Oil",
+        "desc": "Cold pressed oils · 1 litre · Most ordered",
+        "price": 539
+      },
+      {
+        "name": "Black Sesame Oil",
+        "desc": "Cold pressed oils · 1 litre",
+        "price": 519
+      },
+      {
+        "name": "Safflower Oil",
+        "desc": "Cold pressed oils · 1 litre",
+        "price": 569
+      },
+      {
+        "name": "White Rice Bran Oil",
+        "desc": "Cold pressed oils · 1 litre",
+        "price": 269
+      },
+      {
+        "name": "Groundnut Oil",
+        "desc": "Cold pressed oils · 1 litre · Most ordered",
+        "price": 359
+      },
+      {
+        "name": "Mustard Oil (Sarson ka Tel)",
+        "desc": "Cold pressed oils · 1 litre",
+        "price": 369
+      },
+      {
+        "name": "Premium White Jumbo Groundnut Oil",
+        "desc": "Cold pressed oils · 1 litre",
+        "price": 399
+      },
+      {
+        "name": "Buffalo Ghee",
+        "desc": "Ghee · Per kg (min 500 g) · Most ordered",
+        "price": 899
+      },
+      {
+        "name": "Desi Cow Ghee (1 kg)",
+        "desc": "Ghee · 1 kg",
+        "price": 1049
+      },
+      {
+        "name": "Desi Cow Ghee (500 g)",
+        "desc": "Ghee · 500 g",
+        "price": 540
+      },
+      {
+        "name": "Panasapottu (Shredded Jackfruit) Avakai Pickle (500 g)",
+        "desc": "Pickles · 500 g · Most ordered",
+        "price": 199
+      },
+      {
+        "name": "Panasapottu (Shredded Jackfruit) Avakai Pickle (250 g)",
+        "desc": "Pickles · 250 g · Most ordered",
+        "price": 120
+      },
+      {
+        "name": "Pacchi Mirapakaya (Green Chilli) Pickle (500 g)",
+        "desc": "Pickles · 500 g",
+        "price": 199
+      },
+      {
+        "name": "Pacchi Mirapakaya (Green Chilli) Pickle (250 g)",
+        "desc": "Pickles · 250 g",
+        "price": 120
+      },
+      {
+        "name": "Usirikaya (Amla) Pickle (500 g)",
+        "desc": "Pickles · 500 g",
+        "price": 199
+      },
+      {
+        "name": "Usirikaya (Amla) Pickle (250 g)",
+        "desc": "Pickles · 250 g",
+        "price": 120
+      },
+      {
+        "name": "Biryani Aavakaya (500 g)",
+        "desc": "Pickles · 500 g",
+        "price": 299
+      },
+      {
+        "name": "Biryani Aavakaya (250 g)",
+        "desc": "Pickles · 250 g",
+        "price": 150
+      },
+      {
+        "name": "Organic Un-polished Hand Pound Toor Dal (1 kg)",
+        "desc": "Specials · 1 kg · Most ordered",
+        "price": 329
+      },
+      {
+        "name": "Organic Un-polished Hand Pound Toor Dal (500 g)",
+        "desc": "Specials · 500 g · Most ordered",
+        "price": 169
+      },
+      {
+        "name": "Roasted Whole Cashew (unpeeled)",
+        "desc": "Specials · 500 g · Most ordered",
+        "price": 599
+      },
+      {
+        "name": "Dhaniyalu Podi",
+        "desc": "Podis · 200 g",
+        "price": 119
+      },
+      {
+        "name": "Kobbari Karampodi",
+        "desc": "Podis · 200 g",
+        "price": 119
+      },
+      {
+        "name": "Idli Karampodi",
+        "desc": "Podis · 200 g · Most ordered",
+        "price": 119
+      },
+      {
+        "name": "Nalla Karampodi",
+        "desc": "Podis · 200 g",
+        "price": 119
+      },
+      {
+        "name": "Kandi Karampodi",
+        "desc": "Podis · 200 g",
+        "price": 119
+      },
+      {
+        "name": "Chutney Podi",
+        "desc": "Podis · 200 g · Most ordered",
+        "price": 119
+      },
+      {
+        "name": "Palli Karampodi (Peanut)",
+        "desc": "Podis · 200 g",
+        "price": 169
+      },
+      {
+        "name": "Avisa Ginjala Podi (Flaxseed)",
+        "desc": "Podis · 200 g",
+        "price": 169
+      },
+      {
+        "name": "Munagaaku Podi (Moringa)",
+        "desc": "Podis · 200 g · Most ordered",
+        "price": 169
+      }
+    ]
+  }
+]
