@@ -19,6 +19,7 @@ Each line looks like:
 | Thread ID (OS id) | `TID 56780` | `include_thread_id` |
 | Level | `INFO    ` | `include_level` |
 | Seconds since the previous line, or a given runtime | `0.004` / `23.54` | `include_elapsed` |
+| Request ID (off by default) | `REQ 3f2c9a1e-...` | `include_request_id` |
 | Source (module path + class) | `steers_rpa.txr05.DraftFiller` | `include_source` |
 | Message (always written) | `[Filling NOI 12345]` | (none) |
 
@@ -35,7 +36,7 @@ The seconds field:
 ```python
 # main.py, called once when the program starts
 import sys
-sys.path.append(r"C:\...\agent04-d-noi-fabric-draft")   # folder that contains packages/, or set PYTHONPATH
+sys.path.append(r"C:\...\my_project")   # folder that contains packages/, or set PYTHONPATH
 
 from packages.common_logger import LogSetup
 LogSetup.configure(r"C:\...\my_project\logger.properties")   # no argument = the bundled logger.properties
@@ -72,6 +73,7 @@ Copy `logger.properties` into your project and change it there; see the comments
 | `log_level` | Minimum level written: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
 | `mask_sensitive_data` | `true` masks PII such as ER numbers (see Masking); `false` shows them in full |
 | `include_*` | Turn each line part on or off |
+| `include_request_id` | `true` writes the record's `request_id` attribute (set it with a logging filter, as `app/logging_setup.py` does); default `false` |
 
 On start-up the logger keeps appending to the newest `<prefix>_*.log` file in the folder until it is full.
 
@@ -84,6 +86,7 @@ All masking lives in one class, `LogMasker` in `log_masker.py`. One shared insta
 - Always masked, whatever the flag (`always_rules` plus explicit secrets):
   - URL session tokens: `log=abc123` -> `log=...`
   - key=value secrets: the value of `PWD`, `Password`, `AccountKey`, `SharedAccessSignature`, `sig` and `ClientSecret` / `client_secret` (any case) becomes `***` and the key stays, e.g. `UID=svc;PWD=abc;Encrypt=yes` -> `UID=svc;PWD=***;Encrypt=yes` and `...&sig=abc` -> `...&sig=***`. The value runs to the next `;`, `&`, whitespace or the end of the text; an ODBC value in braces (`PWD={a;b}`) is masked whole. A plain sentence such as "the password was rejected" (no `=`) is left alone.
+  - URL passwords: the password in a URL's `user:password@` part becomes `***` and the user stays, e.g. `postgresql://postgres:abc@db.example.com:5432/postgres` -> `postgresql://postgres:***@db.example.com:5432/postgres` (a Supabase `DATABASE_URL` that reaches a log line or an error message).
   - any secret values passed in, e.g. `masker.mask(text, secrets=[password])` -> `***`.
 
 To add a rule, add a method that takes text and returns it masked, then list its name in `pii_rules` (follows the flag) or `always_rules` (never switched off):
@@ -102,7 +105,6 @@ class LogMasker:
 - Give each project its own `logger.properties` and log folder.
 - Want console output too? Call `logging.basicConfig(...)` **before** `LogSetup.configure(...)`; `basicConfig` does nothing once the root logger already has a handler. Note that `log_level` becomes the root logger level, so the console follows it too.
 - `log_directory` expands environment variables: `$VAR` / `${VAR}` everywhere, `%VAR%` on Windows only.
-- Azure Functions: copy the `packages/common_logger` folder into the function app; a `sys.path` entry to a sibling folder will not exist there.
-- In this repo's Function App (repo-root `packages/`), do not call `LogSetup.configure()`: it would wrap every root handler, the host's and every agent's included. Use `logging.getLogger(__name__)` and pass free text through `masker.mask()`.
+- The logger writes files only; nothing here talks to a database. Request audits (one row per request ID and step) go to Supabase through `packages/audit` instead, which masks its log text with the same `masker`.
 - A failed write (full disk, lost file share, OneDrive sync lock) never reaches the code that logged: the line is dropped from the file and one masked `--- Logging error: ...` line goes to stderr instead (nothing when `logging.raiseExceptions` is `False`). The log folder itself is still created in `LogSetup.configure`, so a folder that cannot be created fails there, at start-up.
 - Not handled yet: bad property values, several processes sharing one log file, deleting old files. Keep `log_directory` outside OneDrive.

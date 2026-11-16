@@ -6,8 +6,8 @@ import threading
 class LogMasker:
     """All masking for log output and error text, in one place.
 
-    mask() runs every rule. Secrets (passwords, answers), URL session tokens and key=value secrets
-    (PWD=, AccountKey=, sig=, ...) are always masked. The PII rules in pii_rules (ER numbers today)
+    mask() runs every rule. Secrets (passwords, answers), URL session tokens, key=value secrets
+    (PWD=, AccountKey=, sig=, ...) and URL passwords (postgresql://user:***@host) are always masked. The PII rules in pii_rules (ER numbers today)
     run only while `enabled` is True, which LogSetup.configure sets from mask_sensitive_data in
     logger.properties.
 
@@ -35,8 +35,10 @@ class LogMasker:
         r"(?:\{(?:[^}\n]|\}\})*\}?|[^;&\s]+)",  # an unclosed brace is masked to the end of the line
         re.IGNORECASE,
     )
+    # The password in a URL's user:password@ part, e.g. DATABASE_URL (postgresql://postgres:secret@host).
+    URL_CREDENTIALS = re.compile(r"(://[^:/?#@\s]+:)[^@\s/]+@")
 
-    always_rules = ("mask_session_tokens", "mask_key_value_secrets")
+    always_rules = ("mask_session_tokens", "mask_key_value_secrets", "mask_url_credentials")
     pii_rules = ("mask_er_numbers",)
 
     def __init__(self, enabled=True):
@@ -80,6 +82,10 @@ class LogMasker:
     def mask_key_value_secrets(self, text):
         """Mask the value of each secret key=value pair, keeping the key: PWD=abc;UID=x -> PWD=***;UID=x."""
         return self.KEY_VALUE_SECRET.sub(lambda match: f"{match.group(1)}{match.group(2)}{self.MASK}", text)
+
+    def mask_url_credentials(self, text):
+        """Mask a URL's password, keeping the user: postgresql://postgres:pw@host -> postgresql://postgres:***@host."""
+        return self.URL_CREDENTIALS.sub(lambda match: f"{match.group(1)}{self.MASK}@", text)
 
     def mask_er_numbers(self, text):
         """Shorten every ER number in free text: ER000000 -> ER****00."""

@@ -1,13 +1,18 @@
 {
-  "_comment": "Audit tables: stepNameList holds the step names the calling code passes to audit.record/update (a step belongs to one table only; names differing only in case are refused; a step listed nowhere is not audited), auditflag (false = write nothing for its steps), rollingSize (optional, default 10000: most rows kept; past it the oldest whole requests are deleted) and schema (optional, default audit_dev; packages.db maps only the name NOIDev to NOI_SCHEMA, so the NOI tables follow NOI_SCHEMA while this table stays in audit_dev, beside the draft RPA's rows). NOIDraftEntryAudit is shared: its first 21 steps are the draft RPA's (agents/agent_04/noi_draft_rpa, tools/run_fabric_draft.py), in run order (steers_rpa/run_audit.py; securityQuestion and securityAnswer are written from inside the STEERS login; draftOpen is the resume run's, where a new draft's draftCreate would be; the five answersVerify... steps are the verification module's); the last three are the queue endpoint's (agents/agent_04/noi_draft_queue/service.py). DDL: sql/NOIDraftEntryAudit.sql.",
-  "NOIDraftEntryAudit": {
-    "stepNameList": ["requestReceived", "configLoad", "runLock", "pendingCheck", "milestoneRead", "answersRead",
-                     "answersVerifyNoiType", "answersVerify", "answersVerifyRuleTable", "answersVerifyRequired",
-                     "answersVerifyEligibility", "answersVerifyFlowInputs", "steersLogin", "securityQuestion",
-                     "securityAnswer", "draftOpen", "draftCreate", "credentialsWrite", "formFill", "draftSave",
-                     "statusWrite", "queueRequestReceived", "queueAnswersCheck", "queueStatusUpdate"],
+  "_comment": "Audit tables (Supabase Postgres, created by `python -m scripts.create_audit_tables`; see DATABASE.md). stepNameList holds the step names the calling code passes to audit.record/update: a step belongs to one table only, names differing only in case are refused, and a step listed nowhere is not audited. auditflag false = write nothing for the table's steps. rollingSize (optional, default 10000) = most rows kept; past it the oldest whole requests are deleted. schema (optional, default public). Table and schema names are lowercase Postgres identifiers. orders_audit: order endpoints; review_audit: review endpoints; home_audit: home screen endpoints.",
+  "orders_audit": {
+    "stepNameList": ["ordersUserAll", "ordersUserKitchen", "ordersUserSociety", "ordersDetails"],
     "auditflag": true,
-    "rollingSize": 10000,
-    "schema": "audit_dev"
+    "rollingSize": 10000
+  },
+  "review_audit": {
+    "stepNameList": ["reviewUserAll", "reviewKitchen", "reviewDish", "reviewEdit", "reviewLikeCounter"],
+    "auditflag": true,
+    "rollingSize": 10000
+  },
+  "home_audit": {
+    "stepNameList": ["homeKitchenSocietyAll", "homePinnedUpdate", "homeKitchenLive", "homeKitchenPreorder"],
+    "auditflag": true,
+    "rollingSize": 10000
   }
 }

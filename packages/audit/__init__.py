@@ -1,12 +1,12 @@
-"""Request audits: one row per (request ID, step name) in the audit tables named in audit.json.
+"""Request audits: one row per (request ID, step name) in the Supabase audit tables named in audit.json.
 
-The calling code owns the request ID (a UUID) and the step name (a unique name for one process); this
-package only records the step and updates its logs:
+The calling code owns the request ID (a UUID, e.g. app.request_id.get_request_id()) and the step
+name (a unique name for one process); this package only records the step and updates its logs:
 
     from packages.audit import audit
 
-    def sample_func(request_id):
-        step_name = "draftCreate"  # must be listed in a stepNameList in audit.json
+    def place_order(request_id):
+        step_name = "orderPlace"  # must be listed in a stepNameList in audit.json
         try:
             audit.record(request_id, step_name, "empty log")
             ...  # the process
@@ -15,20 +15,24 @@ package only records the step and updates its logs:
             audit.update(request_id, step_name, error_column=f"{type(exc).__name__}: {exc}")
             raise
 
-- audit.json maps each table to its stepNameList, auditflag and rollingSize; the step name alone
-  picks the table (audit_config.py). A step whose table has auditflag false writes nothing, and a
-  step listed in no table logs a warning and writes nothing.
-- NOIDraftEntryAudit's stepNameList is shared: its first 13 steps are the draft RPA's
-  (agents/agent_04/noi_draft_rpa, which writes them through its own copy of this package), the last
-  three the queue endpoint's (agents/agent_04/noi_draft_queue/service.py).
-- record() inserts the row (Timestamp = now, UTC), then trims the table to its rollingSize by
-  deleting the oldest whole requests (never the current one). update() overwrites ErrorLog
-  (error_column) and/or ActualLog (log_col) of that row; a column left out keeps its value.
+- audit.json maps each table (orders_audit, review_audit, home_audit) to its stepNameList,
+  auditflag and rollingSize; the step name alone picks the table (audit_config.py). A step whose
+  table has auditflag false writes nothing, and a step listed in no table logs a warning and writes
+  nothing.
+- record() inserts the row (timestamp = the database's now()), then trims the table to its
+  rollingSize by deleting the oldest whole requests (never the current one). update() overwrites
+  error_log (error_column) and/or actual_log (log_col) of that row; a column left out keeps its value.
+  Both run synchronously, a few round trips to Supabase per call.
+- write() is the one-call alternative for a step that has already finished: one upsert transaction
+  with the final actual_log / error_log and the step's own timestamp, and a rollingSize trim only
+  every TRIM_EVERY_WRITES writes. The API (app/steps.py) audits every step this way, from a
+  background thread, with its own small connection pool.
 - Nothing raises: a config or database problem is logged and the call returns False (0 for
   enforce_rolling_size), so auditing cannot break the process or hide its exception. Call
   load_audit_config() at start-up to fail fast on a bad audit.json.
-- The database is packages.db (db.target in app.properties), imported on the first call: importing
-  this package never connects. The table DDL is sql/NOIDraftEntryAudit.sql.
+- The database is the app's one engine (packages/database/db.py, DATABASE_URL in .env), imported on
+  the first call: importing this package never connects. The tables are created by
+  `python -m scripts.create_audit_tables` and documented in DATABASE.md.
 """
 
 from packages.audit.audit_config import AuditConfig, AuditConfigError, TableSettings, load_audit_config

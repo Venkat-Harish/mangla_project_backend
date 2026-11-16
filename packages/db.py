@@ -1,109 +1,27 @@
-"""Database (engine + sessions for db.target) and Repository (every read and write) for the orm models."""
+"""Database (sessions on the app's Supabase Postgres engine) and Repository (reads and all-or-nothing writes).
 
-import os
-from functools import cache
-from pathlib import Path
-from urllib.parse import quote_plus
+The engine is the one in packages/database/db.py (DATABASE_URL from .env); this module adds no second
+connection pool. Importing it loads .env and raises if DATABASE_URL is unset, but does not connect.
+"""
 
-from dotenv import load_dotenv
-from sqlalchemy import URL, Engine, create_engine, event
+from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.expression import Executable
 
-from packages.sql_token import SQL_COPT_SS_ACCESS_TOKEN, TokenCache  # noqa: F401 -- re-exported
-
-ROOT = Path(__file__).resolve().parents[1]
-NOI_MODEL_SCHEMA = "NOIDev"  # the schema orm/models/noi are written against (audit.json names audit_dev)
-NOI_SCHEMAS = ("dbo", "NOIDev", "NOITest")  # where NOI tables live; settings.noi_schema takes the same
-
-
-def noi_schema_map() -> dict[str, str]:
-    """Where the NOI tables really are: NOI_SCHEMA, the setting 4B reads (src.lib.settings.noi_schema, same
-    default dbo). Read from the environment so this module never imports the settings' Azure SDKs.
-    A schema outside NOI_SCHEMAS raises here, not as "invalid object name" on the first NOI query."""
-    target = os.environ.get("NOI_SCHEMA", "dbo").strip()
-    if target not in NOI_SCHEMAS:
-        raise RuntimeError(f"NOI_SCHEMA={target!r} is not one of {', '.join(NOI_SCHEMAS)}.")
-    return {} if target == NOI_MODEL_SCHEMA else {NOI_MODEL_SCHEMA: target}
-
-
-@cache
-def _credential():
-    """Built on first use, so a string that signs itself in never imports azure.identity."""
-    from azure.identity import DefaultAzureCredential
-
-    return DefaultAzureCredential(process_timeout=60)  # locally the token comes from `az`, ~16 s
-
-
-def _signs_itself_in(conn: str) -> bool:
-    """True when the string names its own sign-in: Authentication= (ActiveDirectoryMsi on Azure) or
-    UID/PWD. Otherwise -- a local Fabric string -- each connection gets an Entra token, as
-    src.lib.db does; ActiveDirectoryInteractive would hang inside a Functions host."""
-    lowered = conn.lower().replace(" ", "")
-    return "authentication=" in lowered or ("uid=" in lowered and "pwd=" in lowered)
-
-
-_sql_token = TokenCache(lambda: _credential())  # looked up per fetch, so tests can swap it
-
-
-def _inject_token(dialect, conn_rec, cargs, cparams) -> None:  # noqa: ANN001
-    cparams["attrs_before"] = _sql_token.attrs_before()
+from packages.database.db import engine as _engine
 
 
 class Database:
-    """Engine and session factory for the database named by db.target; one instance per process."""
+    """Session factory on the shared engine; one instance per process."""
 
-    TARGETS = ("local", "fabric_dev", "fabric_prod")
-
-    def __init__(
-        self, properties_file: Path = ROOT / "app.properties", env_file: Path = ROOT / ".env"
-    ) -> None:
-        load_dotenv(env_file, override=False)  # real env vars / App Settings always win over .env
-        self.target: str = self._target(properties_file)
-        # quote_plus because the pyodbc dialect unquotes odbc_connect, which would mangle '+' and '%'
-        conn = self._connection_string()
-        url = URL.create("mssql+pyodbc", query={"odbc_connect": quote_plus(conn)})
-        # pyodbc's timeout, not a LoginTimeout tag (msodbcsql 18 ignores it); Entra sign-in needs longer
-        timeout = 15 if self.target == "local" else 60
-        # every NOIDev statement (the NOI models, the audit table) runs against NOI_SCHEMA's tables instead
-        options = {"schema_translate_map": noi_schema_map()}
-        self.engine: Engine = create_engine(
-            url, pool_pre_ping=True, connect_args={"timeout": timeout}, execution_options=options
-        )
-        if not _signs_itself_in(conn):
-            event.listen(self.engine, "do_connect", _inject_token)
-        self._sessions = sessionmaker(self.engine, expire_on_commit=False)
+    def __init__(self, engine: Engine = _engine) -> None:
+        self.engine: Engine = engine
+        # expire_on_commit=False: objects Repository.write returns stay readable after the session closes
+        self._sessions = sessionmaker(engine, expire_on_commit=False)
 
     def session(self) -> Session:
         """A new session on the shared engine; use it in a with block."""
         return self._sessions()
-
-    def _target(self, properties_file: Path) -> str:
-        """AARC_DB_TARGET, else db.target in the properties file; raises when unset or unknown."""
-        raw = os.environ.get("AARC_DB_TARGET") or self._read_properties(properties_file).get("db.target", "")
-        target = raw.strip().lower()
-        if target not in self.TARGETS:
-            raise RuntimeError(
-                f"db.target={raw!r} is not one of {', '.join(self.TARGETS)}. "
-                f"Set it in {properties_file} or override with AARC_DB_TARGET."
-            )
-        return target
-
-    def _connection_string(self) -> str:
-        """DB_CONN_<TARGET> from the environment or .env, used exactly as written; raises when empty."""
-        name = f"DB_CONN_{self.target.upper()}"
-        value = os.environ.get(name, "").strip()
-        if not value:
-            raise RuntimeError(f"{name} is empty or unset, and db.target={self.target!r} selects it.")
-        return value
-
-    @staticmethod
-    def _read_properties(path: Path) -> dict[str, str]:
-        """Parse a flat key=value file; '#' and '!' start comments; a missing file is empty."""
-        if not path.is_file():
-            return {}
-        pairs = (line.strip().partition("=") for line in path.read_text(encoding="utf-8").splitlines())
-        return {k.strip(): v.strip().strip("'\"") for k, sep, v in pairs if sep and k[:1] not in "#!"}
 
 
 class Repository:

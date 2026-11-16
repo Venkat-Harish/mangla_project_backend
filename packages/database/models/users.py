@@ -26,7 +26,12 @@ class User(Base):
         UUID(as_uuid=True),
         ForeignKey("all_kitchens.kitchen_id", use_alter=True, name="users_kitchen_id_fkey"),
     )
+    # JSON list of pinned kitchen IDs (text), e.g. ["3f0c...", "9a1b..."]
     pinned_kitchen: Mapped[Optional[Any]] = mapped_column(JSONB)
+    # JSON list of cart items: [{"dish_id": "<uuid>", "portion_count": 2}, ...]
+    cart: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
     # timestamptz: stored with time zone; .isoformat() gives ISO 8601 with offset
     kitchen_register_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     user_register_time: Mapped[datetime] = mapped_column(

@@ -10,6 +10,7 @@ from .log_masker import masker as shared_masker
 ID_WIDTH = 5  # PID / TID digits, right-aligned; a longer id still prints in full
 LEVEL_WIDTH = len("CRITICAL")
 TIME_WIDTH = len("0.004")  # seconds: 4 digits and the dot
+REQUEST_ID_WIDTH = 36  # a uuid's text; lines logged outside a request show '-' padded to this width
 
 
 def to_milliseconds(seconds):
@@ -56,6 +57,8 @@ class LogLineFormatter(logging.Formatter):
             parts.append(f"{record.levelname:<{LEVEL_WIDTH}}")
         if self.config.include_elapsed:
             parts.append(f"{self._elapsed(record):>{TIME_WIDTH}}")
+        if self.config.include_request_id:
+            parts.append(f"REQ {getattr(record, 'request_id', None) or '-':<{REQUEST_ID_WIDTH}}")
         if self.config.include_source:
             parts.append(self._find_source(record))
 
