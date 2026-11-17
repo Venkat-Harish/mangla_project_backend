@@ -1,5 +1,8 @@
 """Reviews: by user, kitchen or dish; edit text/images; like/dislike counters.
 
+Images are paths in the reviews_photos_and_videos bucket, in the reviewer's folder
+(users/<user_id>/); outputs add a signed URL to each (packages.storage).
+
 Audited in review_audit: reviewUserAll, reviewKitchen, reviewDish, reviewEdit, reviewLikeCounter.
 """
 
@@ -9,9 +12,11 @@ import uuid
 from sqlalchemy import Select, select, update
 from sqlalchemy.orm import Session
 
-from app.errors import NotFoundError
+from app.config import get_settings
+from app.errors import InvalidInputError, NotFoundError
 from app.schemas.reviews import LikeCountsOut, ReviewOut
 from app.steps import audit_step
+from packages import storage
 from packages.database import Dish, Review, User
 
 logger = logging.getLogger(__name__)
@@ -30,9 +35,13 @@ def _reviews() -> Select:
 def _run(session: Session, statement: Select, hide_anonymous: bool) -> list[ReviewOut]:
     """hide_anonymous: blank out everything that identifies who wrote an anonymous review: the
     user, and the order (which /orders/details would map back to the user)."""
+    rows = session.execute(statement).mappings().all()
+    # every review's images signed in one Storage call
+    signed = storage.signed_images("review", [row["images"] for row in rows],
+                                   get_settings().storage_signed_url_seconds)
     reviews = []
-    for row in session.execute(statement).mappings():
-        review = ReviewOut.model_validate(row)
+    for row, images in zip(rows, signed):
+        review = ReviewOut.model_validate({**row, "images": images})
         if hide_anonymous and review.anonymous_flag:
             review = review.model_copy(update={"user_id": None, "user_name": None, "order_id": None})
         reviews.append(review)
@@ -76,9 +85,16 @@ def edit(
     remove_images: list[str],
 ) -> ReviewOut:
     """Change the text and/or images. Images are removed first, then added (no duplicates).
+    An added image must be a file already uploaded to the reviewer's folder; a removed one is
+    only taken off the review (the file stays in Storage).
     The database trigger sets last_edited_time when the content actually changes."""
     with audit_step("reviewEdit", review_id=review_id, text_changed=review_text is not None,
                     add_images=add_images, remove_images=remove_images) as step:
+        reviewer = session.scalar(select(Review.user_id).where(Review.review_id == review_id))
+        if reviewer is None:
+            raise NotFoundError("Review", review_id)
+        if add_images:
+            _check_uploaded(reviewer, add_images)  # before the row lock: it calls Storage
         review = session.scalars(
             select(Review).where(Review.review_id == review_id).with_for_update()
         ).first()
@@ -108,6 +124,18 @@ def edit(
         # otherwise any client could unmask a reviewer with an edit that changes nothing.
         return _run(session, _reviews().where(Review.review_id == review_id),
                     hide_anonymous=True)[0]
+
+
+def _check_uploaded(user_id: uuid.UUID, paths: list[str]) -> None:
+    """Every path must be a file directly in the reviewer's folder, and uploaded already."""
+    folder = storage.folder("review", user_id=user_id)
+    outside = [p for p in paths if not storage.is_in_folder("review", p, user_id=user_id)]
+    if outside:
+        raise InvalidInputError(f"add_images must be photo or video files in {folder}: {outside}")
+    uploaded = storage.existing_files("review", user_id=user_id)
+    missing = [p for p in dict.fromkeys(paths) if p not in uploaded]
+    if missing:
+        raise InvalidInputError(f"add_images not uploaded yet: {missing}")
 
 
 def like_counter(session: Session, review_id: uuid.UUID, like_flag: int) -> LikeCountsOut:

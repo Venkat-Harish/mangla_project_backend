@@ -1,6 +1,7 @@
 import uuid
 
 from packages.database import User
+from tests.conftest import signed
 
 
 def test_kitchen_society_all_pinned_first(client, data):
@@ -70,6 +71,18 @@ def test_kitchen_live(client, data):
     assert [(d["dish_name"], d["active_order_flag"]) for d in kitchens[0]["dishes"]] == [
         ("A1 Live", 1), ("A1 Preorder", 2)]
     assert kitchens[0]["dishes"][0]["dish_price"] == 120.5
+    assert kitchens[0]["dishes"][0]["images"] == []
+
+
+def test_kitchen_live_dish_images_are_signed(client, data, db):
+    folder = f"dishes_pics/{data.kitchen_a1.kitchen_id}/{data.dish_pre.dish_id}/"
+    data.dish_pre.images = [folder + "1.jpg", folder + "2.mp4", 42]  # 42: not a path, dropped
+    db.flush()
+    r = client.post("/app/home/kitchen-live", json={"society_id": str(data.society_a)})
+    [kitchen] = r.json()
+    assert kitchen["dishes"][1]["images"] == [
+        signed("dish_and_kitchen_photos_videos", folder + "1.jpg"),
+        signed("dish_and_kitchen_photos_videos", folder + "2.mp4")]
 
 
 def test_kitchen_preorder(client, data):

@@ -1,7 +1,8 @@
 import uuid
-from typing import Any
 
 from pydantic import BaseModel
+
+from app.schemas.common import ImageOut
 
 
 class CartItemOut(BaseModel):
@@ -12,7 +13,7 @@ class CartItemOut(BaseModel):
     available: bool  # false when the dish no longer exists
     dish_name: str | None = None
     dish_price: float | None = None
-    images: list[Any] = []
+    images: list[ImageOut] = []
     active_order_flag: int | None = None
     kitchen_id: uuid.UUID | None = None
     kitchen_name: str | None = None

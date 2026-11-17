@@ -32,7 +32,8 @@ class Dish(Base):
     )
     dish_name: Mapped[str] = mapped_column(Text, nullable=False)
     dish_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
-    # List of Supabase Storage URLs, e.g. ["https://.../dish1.jpg", ...]
+    # File paths in Storage bucket dish_and_kitchen_photos_videos (packages/storage), e.g.
+    # ["dishes_pics/<kitchen_id>/<dish_id>/<name>.jpg", ...]
     images: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )

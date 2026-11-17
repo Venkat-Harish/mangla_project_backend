@@ -1,10 +1,10 @@
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, model_validator
 
-from app.schemas.common import ORMModel
+from app.schemas.common import ImageOut, ORMModel
 
 
 class KitchenIdIn(BaseModel):
@@ -18,7 +18,8 @@ class DishIdIn(BaseModel):
 class ReviewEditIn(BaseModel):
     review_id: uuid.UUID
     review_text: str | None = None  # None = keep the current text
-    add_images: list[str] = []
+    # paths in reviews_photos_and_videos, e.g. 'users/<reviewer user_id>/<name>.jpg'
+    add_images: list[str] = []  # each must be uploaded already, in the reviewer's folder
     remove_images: list[str] = []
 
     @model_validator(mode="after")
@@ -46,7 +47,7 @@ class ReviewOut(ORMModel):
     user_name: str | None
     rating: float
     review_text: str | None
-    images: list[Any]
+    images: list[ImageOut]
     anonymous_flag: bool
     review_time: datetime
     last_edited_time: datetime | None

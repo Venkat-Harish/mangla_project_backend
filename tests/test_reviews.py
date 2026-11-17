@@ -1,5 +1,13 @@
 import uuid
 
+from tests.conftest import signed
+
+BUCKET = "reviews_photos_and_videos"
+
+
+def _path(user, name: str) -> str:
+    return f"users/{user.user_id}/{name}"
+
 
 def test_user_all_shows_own_anonymous_review(client, data):
     r = client.post("/app/review/user-all", json={"user_id": str(data.customer.user_id)})
@@ -11,6 +19,7 @@ def test_user_all_shows_own_anonymous_review(client, data):
     assert review["rating"] == 4.5
     assert review["dish_name"] == "A1 Live"
     assert review["review_alphanumeric_id"].startswith("REV-")
+    assert review["images"] == [signed(BUCKET, _path(data.customer, "1.jpg"))]
 
 
 def test_kitchen_reviews_hide_anonymous_reviewer(client, data):
@@ -46,35 +55,67 @@ def test_dish_reviews(client, data):
 def test_edit_does_not_unmask_anonymous_reviewer(client, data):
     """An edit that changes nothing must not reveal who wrote an anonymous review."""
     r = client.post("/app/review/edit", json={"review_id": str(data.review_anon.review_id),
-                                              "remove_images": ["https://img/not-there.jpg"]})
+                                              "remove_images": ["users/x/not-there.jpg"]})
     assert r.status_code == 200
     body = r.json()
     assert body["user_id"] is None and body["user_name"] is None and body["order_id"] is None
-    assert body["images"] == ["https://img/1.jpg"]
+    assert body["images"] == [signed(BUCKET, _path(data.customer, "1.jpg"))]
 
     r = client.post("/app/review/edit", json={"review_id": str(data.review_named.review_id),
                                               "review_text": "Okay"})
     assert r.json()["user_name"] == "Test Other"  # a named review still shows its author
 
 
-def test_edit_text_and_images(client, data):
+def test_edit_text_and_images(client, data, fake_storage):
     review_id = str(data.review_anon.review_id)
+    p1, p2, p3 = (_path(data.customer, name) for name in ("1.jpg", "2.jpg", "3.mp4"))
+    fake_storage.uploaded |= {p2, p3}
     r = client.post("/app/review/edit", json={
         "review_id": review_id,
         "review_text": "Even better the second time",
-        "add_images": ["https://img/2.jpg", "https://img/3.jpg", "https://img/2.jpg"],
-        "remove_images": ["https://img/1.jpg"],
+        "add_images": [p2, p3, p2],
+        "remove_images": [p1],
     })
     assert r.status_code == 200
     body = r.json()
     assert body["review_text"] == "Even better the second time"
-    assert body["images"] == ["https://img/2.jpg", "https://img/3.jpg"]
+    assert body["images"] == [signed(BUCKET, p2), signed(BUCKET, p3)]
     assert body["last_edited_time"] is not None
 
-    r = client.post("/app/review/edit", json={"review_id": review_id,
-                                              "remove_images": ["https://img/3.jpg"]})
-    assert r.json()["images"] == ["https://img/2.jpg"]
+    r = client.post("/app/review/edit", json={"review_id": review_id, "remove_images": [p3]})
+    assert r.json()["images"] == [signed(BUCKET, p2)]
     assert r.json()["review_text"] == "Even better the second time"  # untouched
+
+
+def test_edit_rejects_images_outside_reviewers_folder(client, data, fake_storage):
+    review_id = str(data.review_anon.review_id)
+    mine = f"users/{data.customer.user_id}/"
+    bad_paths = [
+        _path(data.other_user, "x.jpg"),  # someone else's folder
+        mine + "../x.jpg",
+        mine + "sub/x.jpg",
+        mine + ".emptyFolderPlaceholder",
+        mine + "notes.txt",  # not a photo or video
+        "x.jpg",
+    ]
+    fake_storage.uploaded |= set(bad_paths)
+    for path in bad_paths:
+        r = client.post("/app/review/edit", json={"review_id": review_id, "add_images": [path]})
+        assert r.status_code == 422, path
+        assert "request_id" in r.json()
+
+    r = client.post("/app/review/edit", json={"review_id": review_id,
+                                              "add_images": [mine + "never-uploaded.jpg"]})
+    assert r.status_code == 422 and "not uploaded" in r.json()["detail"]
+
+    r = client.post("/app/review/user-all", json={"user_id": str(data.customer.user_id)})
+    assert r.json()[0]["images"] == [signed(BUCKET, _path(data.customer, "1.jpg"))]  # unchanged
+
+
+def test_edit_unknown_review_with_images(client, data):
+    r = client.post("/app/review/edit", json={"review_id": str(uuid.uuid4()),
+                                              "add_images": [_path(data.customer, "a.jpg")]})
+    assert r.status_code == 404
 
 
 def test_edit_rejects_empty_and_unknown(client, data):

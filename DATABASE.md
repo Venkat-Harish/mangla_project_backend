@@ -148,7 +148,7 @@ ALTER TABLE public.all_kitchens ENABLE ROW LEVEL SECURITY;
 | kitchen_id | uuid | no | | FK → all_kitchens |
 | dish_name | text | no | | |
 | dish_price | numeric(10,2) | no | | ≥ 0; exact decimal (Python `Decimal`) |
-| images | jsonb | no | `'[]'` | List of Supabase Storage URLs |
+| images | jsonb | no | `'[]'` | List of file paths in Storage bucket `dish_and_kitchen_photos_videos` (`dishes_pics/<kitchen_id>/<dish_id>/<file>`) |
 | description | text | yes | | |
 | active_order_flag | smallint | no | 0 | 0 = not taking orders, 1 = live, 2 = preorder. Was boolean until 2026-11-17 (false → 0, true → 1) |
 | order_close_time | timestamptz | yes | | ISO 8601 with time zone |
@@ -251,7 +251,7 @@ ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 | user_id | uuid | no | | FK → users |
 | rating | numeric(2,1) | no | | Half stars 0.5–5.0 (Python `Decimal`) |
 | review_text | text | yes | | |
-| images | jsonb | no | `'[]'` | List of Supabase Storage URLs |
+| images | jsonb | no | `'[]'` | List of file paths in Storage bucket `reviews_photos_and_videos` (`users/<user_id>/<file>`) |
 | anonymous_flag | boolean | no | false | |
 | review_time | timestamptz | no | now() | ISO 8601 with time zone |
 | last_edited_time | timestamptz | yes | trigger | Set when rating/text/images/anonymous_flag change; null if never edited |

@@ -9,6 +9,14 @@ class ORMModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ImageOut(BaseModel):
+    """A photo or video: its path in the bucket (what the database stores and endpoints take
+    back), and a short-lived signed URL to show it (null if the file can't be signed)."""
+
+    path: str
+    url: str | None
+
+
 class UserIdIn(BaseModel):
     user_id: uuid.UUID
 

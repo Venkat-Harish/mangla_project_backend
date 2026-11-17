@@ -6,9 +6,12 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.errors import NotFoundError
 from app.schemas.cart import CartItemOut, CartOut
+from app.schemas.common import ImageOut
 from app.steps import log_step
+from packages import storage
 from packages.database import Dish, Kitchen, User
 
 logger = logging.getLogger(__name__)
@@ -43,6 +46,10 @@ def user_cart(session: Session, user_id: uuid.UUID) -> CartOut:
                 .where(Dish.dish_id.in_(dish_ids))
             ).all()
             dishes = {dish.dish_id: (dish, kitchen_name) for dish, kitchen_name in rows}
+        # every dish's images signed in one Storage call
+        signed = storage.signed_images("dish", [dish.images for dish, _ in dishes.values()],
+                                       get_settings().storage_signed_url_seconds)
+        images = dict(zip(dishes, signed))
 
         items = []
         for entry in entries:
@@ -59,7 +66,7 @@ def user_cart(session: Session, user_id: uuid.UUID) -> CartOut:
                     "available": True,
                     "dish_name": dish.dish_name,
                     "dish_price": float(dish.dish_price),
-                    "images": dish.images,
+                    "images": [ImageOut(**image) for image in images[dish.dish_id]],  # model_copy skips validation
                     "active_order_flag": dish.active_order_flag,
                     "kitchen_id": dish.kitchen_id,
                     "kitchen_name": kitchen_name,

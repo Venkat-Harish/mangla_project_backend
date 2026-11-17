@@ -46,7 +46,7 @@ class Review(Base):
     # Half stars: 0.5, 1.0, 1.5 ... 5.0
     rating: Mapped[Decimal] = mapped_column(Numeric(2, 1), nullable=False)
     review_text: Mapped[Optional[str]] = mapped_column(Text)
-    # List of Supabase Storage URLs
+    # File paths in Storage bucket reviews_photos_and_videos: users/<user_id>/<name>.jpg
     images: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )

@@ -32,7 +32,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.config import get_settings
-from app.errors import NotFoundError
+from app.errors import InvalidInputError, NotFoundError
 from app.request_id import get_request_id
 from packages.audit import Audit
 from packages.database.db import DATABASE_URL
@@ -153,7 +153,7 @@ def _step(step_name: str, audited: bool, inputs: dict) -> Iterator[Step]:
     except Exception as exc:
         ms = round((time.perf_counter() - started) * 1000)
         error = f"{type(exc).__name__}: {exc}"
-        level = logging.WARNING if isinstance(exc, NotFoundError) else logging.ERROR
+        level = logging.WARNING if isinstance(exc, (NotFoundError, InvalidInputError)) else logging.ERROR
         logger.log(level, "%s failed after %d ms: %s", step_name, ms, error, stacklevel=_CALLER)
         if request_id:
             audit_writer.submit(audit_store.write, request_id, step_name,
