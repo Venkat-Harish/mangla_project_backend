@@ -15,8 +15,9 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set. Add it to mangla_backend/.env")
 
-# The single engine (connection pool) used everywhere.
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+# The single engine (connection pool) used everywhere. connect_timeout: fail in 10 s, rather than
+# the operating system's TCP timeout, when Supabase cannot be reached.
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args={"connect_timeout": 10})
 
 SessionLocal = sessionmaker(bind=engine)
 

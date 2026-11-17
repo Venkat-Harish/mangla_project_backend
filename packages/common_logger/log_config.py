@@ -22,6 +22,9 @@ class LogConfig:
         self.include_level = self._get_bool("include_level")
         self.include_elapsed = self._get_bool("include_elapsed")
         self.include_source = self._get_bool("include_source")
+        # Off unless asked for: the record's request_id attribute, which the application's own
+        # logging filter sets (e.g. from a per-request ContextVar).
+        self.include_request_id = self._get_bool("include_request_id", "false")
 
     def _read_pairs(self, path):
         """Return every key=value line as a dict, skipping blank lines and # or ! comments."""

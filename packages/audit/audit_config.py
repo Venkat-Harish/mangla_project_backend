@@ -2,17 +2,20 @@
 
 audit.json maps each audit table to its settings:
 
-    {"NOIDraftEntryAudit": {"stepNameList": ["draftCreate", "credentialsWrite"], "auditflag": true,
-                            "rollingSize": 10000, "schema": "audit_dev"}}
+    {"orders_audit": {"stepNameList": ["orderPlace", "orderCancel"], "auditflag": true,
+                      "rollingSize": 10000, "schema": "public"}}
 
 - stepNameList: the step names the calling code passes for that table (may be empty until the code
   is wired). A step belongs to one table only, so the step name alone picks the table. Callers pass
-  the exact spelling; names that differ only in case are refused (the database collation would
-  treat them as the same StepName).
+  the exact spelling; names that differ only in case are refused, so two steps never look alike.
 - auditflag: false turns the table off; its steps are known but nothing is written.
 - rollingSize: optional, default 10000; the most rows the table keeps. Past it the oldest whole
   requests are deleted.
-- schema: optional, default audit_dev.
+- schema: optional, default public.
+
+Table and schema names must be plain lowercase Postgres identifiers (letters, digits, underscores,
+not starting with a digit, at most 63 characters), so they match the unquoted names the tables were
+created with (scripts/create_audit_tables.py).
 """
 
 import json
@@ -22,12 +25,13 @@ from functools import cache
 from pathlib import Path
 
 DEFAULT_CONFIG_FILE = Path(__file__).resolve().with_name("audit.json")
-DEFAULT_SCHEMA = "audit_dev"
+DEFAULT_SCHEMA = "public"
 DEFAULT_ROLLING_SIZE = 10000
-STEP_NAME_MAX_LENGTH = 100  # StepName is nvarchar(100)
-SQL_NAME_MAX_LENGTH = 128  # sysname
+SQL_NAME_MAX_LENGTH = 63  # Postgres truncates longer identifiers (NAMEDATALEN - 1)
 _TABLE_KEYS = {"_comment", "stepNameList", "auditflag", "rollingSize", "schema"}
-_SQL_NAME = re.compile(r"[A-Za-z_]\w*", re.ASCII)  # used with fullmatch: "$" would accept a final newline
+# Lowercase only: Postgres folds unquoted names to lowercase, and SQLAlchemy quotes a name with capitals,
+# so "OrdersAudit" would point at a different table than the unquoted orders_audit.
+_SQL_NAME = re.compile(r"[a-z_][a-z0-9_]*", re.ASCII)  # used with fullmatch: "$" would accept a final newline
 
 
 class AuditConfigError(Exception):
@@ -121,14 +125,13 @@ def _check_config(data, name: str) -> AuditConfig:
         fail("must be a JSON object of table name -> settings")
     tables: dict[str, TableSettings] = {}
     step_to_table: dict[str, str] = {}
-    seen_tables: dict[tuple[str, str], str] = {}  # (schema, table) casefolded -> table
     seen_steps: dict[str, str] = {}  # step casefolded -> table
     for table, raw in data.items():
         if table == "_comment":
             continue
         if not _is_sql_name(table):
-            fail(f"table name {table!r} is not a plain SQL identifier "
-                 f"of at most {SQL_NAME_MAX_LENGTH} characters")
+            fail(f"table name {table!r} is not a plain lowercase Postgres identifier "
+                 f"(a-z, 0-9, _; at most {SQL_NAME_MAX_LENGTH} characters)")
         if not isinstance(raw, dict):
             fail(f"{table} must be an object with stepNameList and auditflag")
         unknown = set(raw) - _TABLE_KEYS
@@ -146,19 +149,12 @@ def _check_config(data, name: str) -> AuditConfig:
         if isinstance(size, bool) or not isinstance(size, int) or size < 1:
             fail(f"{table}.rollingSize must be a whole number of at least 1")
         if not _is_sql_name(schema):
-            fail(f"{table}.schema {schema!r} is not a plain SQL identifier "
-                 f"of at most {SQL_NAME_MAX_LENGTH} characters")
-        table_key = (schema.casefold(), table.casefold())
-        if table_key in seen_tables:
-            fail(f"{table} and {seen_tables[table_key]} are the same table (case is ignored)")
-        seen_tables[table_key] = table
+            fail(f"{table}.schema {schema!r} is not a plain lowercase Postgres identifier "
+                 f"(a-z, 0-9, _; at most {SQL_NAME_MAX_LENGTH} characters)")
 
         for step in steps:
             if not isinstance(step, str) or not step.strip() or step != step.strip():
                 fail(f"{table}.stepNameList entries must be non-empty text without surrounding spaces")
-            if len(step) > STEP_NAME_MAX_LENGTH:
-                fail(f"step {step[:20]!r}... in {table} is longer than {STEP_NAME_MAX_LENGTH} characters "
-                     "(the StepName column size)")
             key = step.casefold()
             if key in seen_steps:
                 fail(f"step {step!r} in {table} is already listed in {seen_steps[key]} (case is ignored)")
@@ -172,5 +168,5 @@ def _check_config(data, name: str) -> AuditConfig:
 
 
 def _is_sql_name(name) -> bool:
-    """True for a plain SQL identifier SQL Server accepts unquoted, at most 128 characters."""
+    """True for a plain lowercase Postgres identifier that needs no quoting, at most 63 characters."""
     return isinstance(name, str) and len(name) <= SQL_NAME_MAX_LENGTH and bool(_SQL_NAME.fullmatch(name))

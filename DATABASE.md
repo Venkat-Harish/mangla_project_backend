@@ -25,6 +25,9 @@ Install deps: `pip install -r requirements.txt`
 | 3 | [all_dishes](#all_dishes) | Dishes each kitchen offers, with price, images and timings | 2026-11-16 |
 | 4 | [orders](#orders) | Orders placed by users for a dish from a kitchen | 2026-11-16 |
 | 5 | [all_reviews](#all_reviews) | Users' reviews of dishes, tied to an order | 2026-11-16 |
+| 6 | [orders_audit](#orders_audit) | Request audit: one row per (request ID, step) of the order endpoints | 2026-11-17 |
+| 7 | [review_audit](#review_audit) | Request audit: one row per (request ID, step) of the review endpoints | 2026-11-17 |
+| 8 | [home_audit](#home_audit) | Request audit: one row per (request ID, step) of the home screen endpoints | 2026-11-17 |
 
 ## Auto-generated alphanumeric IDs
 
@@ -53,9 +56,10 @@ Install deps: `pip install -r requirements.txt`
 | flat_number | text | yes | | |
 | kitchen_flag | boolean | no | false | True if the user runs a kitchen |
 | kitchen_id | uuid | yes | | FK → all_kitchens.kitchen_id |
-| pinned_kitchen | jsonb | yes | | |
+| pinned_kitchen | jsonb | yes | | List of pinned kitchen IDs as text, e.g. `["3f0c…", "9a1b…"]`; written by `/app/home/update-pinned` |
 | kitchen_register_time | timestamptz | yes | | ISO 8601 with time zone |
 | user_register_time | timestamptz | no | now() | ISO 8601 with time zone |
+| cart | jsonb | no | `'[]'` | Cart items: `[{"dish_id": "<uuid>", "portion_count": 2}, …]`; added 2026-11-17 |
 
 **Keys / foreign keys:** PK `users_pkey` (user_id); unique `users_phone_number_key` (phone_number); FK `users_kitchen_id_fkey` (kitchen_id → all_kitchens), added 2026-11-16 with `ALTER TABLE` because users and all_kitchens reference each other.
 **Indexes:** the ones created by the PK and the unique constraint.
@@ -81,6 +85,8 @@ ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 -- added 2026-11-16, once all_kitchens existed
 ALTER TABLE public.users ADD CONSTRAINT users_kitchen_id_fkey
 	FOREIGN KEY (kitchen_id) REFERENCES public.all_kitchens (kitchen_id);
+-- added 2026-11-17 (scripts/migrate_cart_and_active_order.py)
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS cart JSONB DEFAULT '[]'::jsonb NOT NULL;
 ```
 
 ---
@@ -142,12 +148,13 @@ ALTER TABLE public.all_kitchens ENABLE ROW LEVEL SECURITY;
 | dish_price | numeric(10,2) | no | | ≥ 0; exact decimal (Python `Decimal`) |
 | images | jsonb | no | `'[]'` | List of Supabase Storage URLs |
 | description | text | yes | | |
-| active_order_flag | boolean | no | false | |
+| active_order_flag | smallint | no | 0 | 0 = not taking orders, 1 = live, 2 = preorder. Was boolean until 2026-11-17 (false → 0, true → 1) |
 | order_close_time | timestamptz | yes | | ISO 8601 with time zone |
 | pickup_time | timestamptz | yes | | ISO 8601 with time zone |
 | portions_count | integer | yes | | ≥ 0 |
 
-**Keys / foreign keys:** PK `all_dishes_pkey`; FK `all_dishes_kitchen_id_fkey` → all_kitchens; checks `ck_all_dishes_dish_price_nonnegative`, `ck_all_dishes_portions_count_nonnegative`.
+**Keys / foreign keys:** PK `all_dishes_pkey`; FK `all_dishes_kitchen_id_fkey` → all_kitchens; checks `ck_all_dishes_dish_price_nonnegative`, `ck_all_dishes_portions_count_nonnegative`, `ck_all_dishes_active_order_flag_range` (0, 1 or 2).
+**Used by:** `/app/home/kitchen-live` (flag 1 or 2) and `/app/home/kitchen-preorder` (flag 2).
 **Indexes:** `ix_all_dishes_kitchen_id_dish_id` (kitchen_id, dish_id), which makes looking up a kitchen's dishes fast.
 **Row Level Security:** enabled, no policies.
 
@@ -159,15 +166,18 @@ CREATE TABLE all_dishes (
 	dish_price NUMERIC(10, 2) NOT NULL,
 	images JSONB DEFAULT '[]'::jsonb NOT NULL,
 	description TEXT,
-	active_order_flag BOOLEAN DEFAULT false NOT NULL,
+	active_order_flag SMALLINT DEFAULT 0 NOT NULL,
 	order_close_time TIMESTAMP WITH TIME ZONE,
 	pickup_time TIMESTAMP WITH TIME ZONE,
 	portions_count INTEGER,
 	PRIMARY KEY (dish_id),
 	CONSTRAINT ck_all_dishes_dish_price_nonnegative CHECK (dish_price >= 0),
 	CONSTRAINT ck_all_dishes_portions_count_nonnegative CHECK (portions_count >= 0),
+	CONSTRAINT ck_all_dishes_active_order_flag_range CHECK (active_order_flag IN (0, 1, 2)),
 	FOREIGN KEY(kitchen_id) REFERENCES all_kitchens (kitchen_id)
 );
+-- 2026-11-17: active_order_flag converted from BOOLEAN by scripts/migrate_cart_and_active_order.py
+-- (ALTER COLUMN ... TYPE SMALLINT USING (CASE WHEN active_order_flag THEN 1 ELSE 0 END))
 CREATE INDEX ix_all_dishes_kitchen_id_dish_id ON all_dishes (kitchen_id, dish_id);
 ALTER TABLE public.all_dishes ENABLE ROW LEVEL SECURITY;
 ```
@@ -285,13 +295,119 @@ ALTER TABLE public.all_reviews ENABLE ROW LEVEL SECURITY;
 
 ---
 
+## Audit tables
+
+`orders_audit`, `review_audit` and `home_audit` share one shape: one row per (request ID, step name), written by `packages/audit` (`from packages.audit import audit`; `audit.record(request_id, step_name, log_col)` inserts the row, `audit.update(request_id, step_name, error_column=..., log_col=...)` overwrites its logs, and `audit.write(...)` writes a finished step's whole row in one upsert). The request ID is the uuid the API creates for each request.
+
+- **How the API writes them:** `app/steps.py` (`audit_step`) writes one row when each audited step ends, with `audit.write`: `timestamp` = when the step started, `actual_log` = `<inputs as JSON> -> <result> (<ms> ms)`, and on failure `error_log` = `<Error>: <message>`. Rows go through a background thread and a small connection pool of their own (`audit.*` in `app.properties`).
+- **Step names → table:** `packages/audit/audit.json`. Each table lists its steps in `stepNameList`; the step name alone picks the table, and a step listed nowhere is not written. `auditflag: false` turns a table off. Today: `orders_audit` ← ordersUserAll, ordersUserKitchen, ordersUserSociety, ordersDetails; `home_audit` ← homeKitchenSocietyAll, homePinnedUpdate, homeKitchenLive, homeKitchenPreorder; `review_audit` ← reviewUserAll, reviewKitchen, reviewDish, reviewEdit, reviewLikeCounter.
+- **Rolling size:** each table keeps at most `rollingSize` rows (10000), deleting the oldest whole requests past that. `record()` trims after every insert; `write()` trims on a table's first write and then every 100 writes, so a table can briefly hold up to 99 rows more.
+- **Definition:** `build_audit_table` in `packages/audit/audit_store.py` (Core table, no ORM model). The same definition creates the tables.
+- **Script:** `scripts/create_audit_tables.py`. Run from `mangla_backend/`: `python -m scripts.create_audit_tables`. It creates every table in `audit.json` that does not exist yet and enables RLS. Safe to re-run; existing tables are not changed.
+- No foreign keys: `request_id` is not a row in another table.
+
+---
+
+## orders_audit
+
+**Purpose:** Audit rows for the order endpoints: one row per request and step, with the step's log and error.
+**Definition:** `packages/audit/audit_store.py` (`build_audit_table`), created by `scripts/create_audit_tables.py`
+**Created:** 2026-11-17
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| request_id | uuid | no | | The request's uuid (from the API); PK part 1 |
+| timestamp | timestamptz | no | now() | When the step started (the API passes it; now() if not given); ISO 8601 with time zone |
+| step_name | text | no | | A step from `orders_audit.stepNameList` in `audit.json`; PK part 2 |
+| actual_log | text | yes | | The step's log (`log_col`), masked like the log files |
+| error_log | text | yes | | The step's error (`error_column`); null if it succeeded |
+
+**Keys / foreign keys:** PK `orders_audit_pkey` (request_id, step_name); no foreign keys.
+**Indexes:** only the PK. **Row Level Security:** enabled, no policies.
+
+```sql
+CREATE TABLE public.orders_audit (
+	request_id UUID NOT NULL,
+	timestamp TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+	step_name TEXT NOT NULL,
+	actual_log TEXT,
+	error_log TEXT,
+	CONSTRAINT orders_audit_pkey PRIMARY KEY (request_id, step_name)
+);
+ALTER TABLE public.orders_audit ENABLE ROW LEVEL SECURITY;
+```
+
+---
+
+## review_audit
+
+**Purpose:** Audit rows for the review endpoints: one row per request and step, with the step's log and error.
+**Definition:** `packages/audit/audit_store.py` (`build_audit_table`), created by `scripts/create_audit_tables.py`
+**Created:** 2026-11-17
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| request_id | uuid | no | | The request's uuid (from the API); PK part 1 |
+| timestamp | timestamptz | no | now() | When the step started (the API passes it; now() if not given); ISO 8601 with time zone |
+| step_name | text | no | | A step from `review_audit.stepNameList` in `audit.json`; PK part 2 |
+| actual_log | text | yes | | The step's log (`log_col`), masked like the log files |
+| error_log | text | yes | | The step's error (`error_column`); null if it succeeded |
+
+**Keys / foreign keys:** PK `review_audit_pkey` (request_id, step_name); no foreign keys.
+**Indexes:** only the PK. **Row Level Security:** enabled, no policies.
+
+```sql
+CREATE TABLE public.review_audit (
+	request_id UUID NOT NULL,
+	timestamp TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+	step_name TEXT NOT NULL,
+	actual_log TEXT,
+	error_log TEXT,
+	CONSTRAINT review_audit_pkey PRIMARY KEY (request_id, step_name)
+);
+ALTER TABLE public.review_audit ENABLE ROW LEVEL SECURITY;
+```
+
+---
+
+## home_audit
+
+**Purpose:** Audit rows for the home screen endpoints: one row per request and step, with the step's log and error.
+**Definition:** `packages/audit/audit_store.py` (`build_audit_table`), created by `scripts/create_audit_tables.py`
+**Created:** 2026-11-17
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| request_id | uuid | no | | The request's uuid (from the API); PK part 1 |
+| timestamp | timestamptz | no | now() | When the step started (the API passes it; now() if not given); ISO 8601 with time zone |
+| step_name | text | no | | A step from `home_audit.stepNameList` in `audit.json`; PK part 2 |
+| actual_log | text | yes | | The step's log (`log_col`), masked like the log files |
+| error_log | text | yes | | The step's error (`error_column`); null if it succeeded |
+
+**Keys / foreign keys:** PK `home_audit_pkey` (request_id, step_name); no foreign keys.
+**Indexes:** only the PK. **Row Level Security:** enabled, no policies.
+
+```sql
+CREATE TABLE public.home_audit (
+	request_id UUID NOT NULL,
+	timestamp TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+	step_name TEXT NOT NULL,
+	actual_log TEXT,
+	error_log TEXT,
+	CONSTRAINT home_audit_pkey PRIMARY KEY (request_id, step_name)
+);
+ALTER TABLE public.home_audit ENABLE ROW LEVEL SECURITY;
+```
+
+---
+
 ## Seed data
 
 **Pilot kitchens** (loaded 2026-11-16): the six pilot cooks, their kitchens and menus.
 
 - **Data:** `seed/pilot_kitchens.json`, exported from the prototype's `src/data/cooks.js` (owner, phone numbers in E.164 like `+917993753928`, menu name/description/price).
 - **Script:** `scripts/seed_pilot_kitchens.py`. Run from `mangla_backend/`: `python -m scripts.seed_pilot_kitchens`
-- **Loads:** 7 users (Yummy Food has a second number, linked as `user_id2`), 6 kitchens, 99 dishes. Users get `kitchen_flag = true` and `kitchen_id`; society, block and flat are NULL until known. Dishes have `images = []` and `active_order_flag = false`.
+- **Loads:** 7 users (Yummy Food has a second number, linked as `user_id2`), 6 kitchens, 99 dishes. Users get `kitchen_flag = true` and `kitchen_id`; society, block and flat are NULL until known. Dishes have `images = []` and `active_order_flag = 0`.
 - **Re-running** is safe: users are matched by phone, kitchens by (name, main owner), dishes by (kitchen, name). Existing rows are updated, nothing is duplicated. One transaction; any error rolls everything back.
 - To refresh after editing the prototype's menus, re-export the JSON from `prototype/` (Node import of `src/data/cooks.js`) and run the script again. Dishes removed from the JSON are not deleted from the table.
 

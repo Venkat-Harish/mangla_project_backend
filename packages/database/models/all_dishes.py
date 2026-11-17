@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Any, Optional
 
 from sqlalchemy import (
-    Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, Text, false, text,
+    CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, SmallInteger, Text, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -19,6 +19,9 @@ class Dish(Base):
         Index("ix_all_dishes_kitchen_id_dish_id", "kitchen_id", "dish_id"),
         CheckConstraint("dish_price >= 0", name="ck_all_dishes_dish_price_nonnegative"),
         CheckConstraint("portions_count >= 0", name="ck_all_dishes_portions_count_nonnegative"),
+        CheckConstraint(
+            "active_order_flag IN (0, 1, 2)", name="ck_all_dishes_active_order_flag_range"
+        ),
     )
 
     dish_id: Mapped[uuid.UUID] = mapped_column(
@@ -34,8 +37,9 @@ class Dish(Base):
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
     description: Mapped[Optional[str]] = mapped_column(Text)
-    active_order_flag: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=false()
+    # 0 = not taking orders, 1 = live, 2 = preorder
+    active_order_flag: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default=text("0")
     )
     order_close_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     pickup_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
