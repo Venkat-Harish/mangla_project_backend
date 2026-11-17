@@ -370,6 +370,9 @@ ALTER TABLE public.posts ENABLE ROW LEVEL SECURITY;
 
 **Who maintains what:**
 - **The backend** updates `total_reviews_count` and `total_stars` whenever a review is added, its rating changes, or it's deleted. For example, adding a 4.5 means `count + 1` and `stars + 4.5`.
+  - It does this only through `record_rating_change(session, dish_id, old_rating, new_rating)` in `app/services/ratings.py`, called in the same transaction as the review write. Pass `old_rating=None` for a new review and `new_rating=None` for a deleted one.
+  - The function is one atomic UPDATE, so concurrent requests can't lose updates.
+  - No endpoint changes ratings yet: `/review/edit` only edits text and images. A future create, delete or re-rate endpoint must call it.
 - **The database** computes `average_rating` from those two totals.
 - **The database** keeps exactly one row per dish:
   - existing dishes were backfilled with 0 reviews
