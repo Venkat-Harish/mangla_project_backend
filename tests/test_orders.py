@@ -47,8 +47,12 @@ def test_details(client, data):
     assert r.status_code == 200
     body = r.json()
     assert set(body) == {"order_id", "order_alphanumeric_id", "kitchen_id", "dish_id", "user_id",
-                         "portion_count", "order_time", "order_status", "payment_id", "refund_flag"}
+                         "portion_count", "order_time", "order_status", "payment_id", "refund_flag",
+                         "review_id"}
     assert body["kitchen_id"] == str(data.kitchen_b.kitchen_id)
+    assert body["review_id"] is None  # order_b has no review yet
+    reviewed = client.post("/app/orders/details", json={"order_id": str(data.order_old.order_id)})
+    assert reviewed.json()["review_id"] == str(data.review_anon.review_id)
     assert body["portion_count"] == 2
     assert client.post("/app/orders/details",
                        json={"order_id": str(uuid.uuid4())}).status_code == 404

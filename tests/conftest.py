@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db
 from app.main import app
+from app.services.ratings import record_rating_change
 from app.steps import audit_writer
 from packages.database import Dish, Kitchen, Order, Review, User, engine
 from packages.storage import client as storage_client
@@ -160,6 +161,14 @@ def data(db) -> Data:
         {"dish_id": str(dish_live.dish_id), "portion_count": 2},
         {"dish_id": str(uuid.uuid4()), "portion_count": 1},
     ]
+    db.flush()
+    # Each review's order points back at it and the dishes' average_ratings totals count both
+    # reviews, as after /orders/review (which would also make the reviewer the order's user;
+    # review_named deliberately differs). order_b stays unreviewed.
+    order_old.review_id = review_anon.review_id
+    order_new.review_id = review_named.review_id
+    record_rating_change(db, dish_live.dish_id, None, review_anon.rating)
+    record_rating_change(db, dish_pre.dish_id, None, review_named.rating)
     db.flush()
     for obj in (order_old, order_new, order_b, review_anon, review_named,
                 kitchen_a1, kitchen_a2, kitchen_b):

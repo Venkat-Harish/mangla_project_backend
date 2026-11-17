@@ -9,7 +9,7 @@
   (packages.audit Audit.write): timestamp = when the step started, actual_log =
   '<inputs> -> <result> (N ms)', and on failure error_log = '<Error>: <message>'.
   The step name must be in a stepNameList in packages/audit/audit.json, which picks the table
-  (orders_audit, review_audit or home_audit).
+  (orders_audit, review_audit, home_audit or posts_audit).
 - log_step only logs (for endpoint groups without an audit table: cart, account).
 
 Audit rows are written through their own small connection pool, so they never wait on (or hold)
@@ -32,12 +32,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.config import get_settings
-from app.errors import InvalidInputError, NotFoundError
+from app.errors import ConflictError, InvalidInputError, NotFoundError
 from app.request_id import get_request_id
 from packages.audit import Audit
 from packages.database.db import DATABASE_URL
 
 logger = logging.getLogger(__name__)
+
+# Errors a client can cause (404, 409, 422): logged as warnings, anything else as an error.
+_EXPECTED_ERRORS = (NotFoundError, ConflictError, InvalidInputError)
 
 # Step lines name the service that ran the step (this generator <- contextlib <- service).
 _CALLER = 3
@@ -153,7 +156,7 @@ def _step(step_name: str, audited: bool, inputs: dict) -> Iterator[Step]:
     except Exception as exc:
         ms = round((time.perf_counter() - started) * 1000)
         error = f"{type(exc).__name__}: {exc}"
-        level = logging.WARNING if isinstance(exc, (NotFoundError, InvalidInputError)) else logging.ERROR
+        level = logging.WARNING if isinstance(exc, _EXPECTED_ERRORS) else logging.ERROR
         logger.log(level, "%s failed after %d ms: %s", step_name, ms, error, stacklevel=_CALLER)
         if request_id:
             audit_writer.submit(audit_store.write, request_id, step_name,

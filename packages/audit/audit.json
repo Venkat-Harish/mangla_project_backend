@@ -1,7 +1,7 @@
 {
-  "_comment": "Audit tables (Supabase Postgres, created by `python -m scripts.create_audit_tables`; see DATABASE.md). stepNameList holds the step names the calling code passes to audit.record/update: a step belongs to one table only, names differing only in case are refused, and a step listed nowhere is not audited. auditflag false = write nothing for the table's steps. rollingSize (optional, default 10000) = most rows kept; past it the oldest whole requests are deleted. schema (optional, default public). Table and schema names are lowercase Postgres identifiers. orders_audit: order endpoints; review_audit: review endpoints; home_audit: home screen endpoints.",
+  "_comment": "Audit tables (Supabase Postgres, created by `python -m scripts.create_audit_tables`; see DATABASE.md). stepNameList holds the step names the calling code passes to audit.record/update: a step belongs to one table only, names differing only in case are refused, and a step listed nowhere is not audited. auditflag false = write nothing for the table's steps. rollingSize (optional, default 10000) = most rows kept; past it the oldest whole requests are deleted. schema (optional, default public). Table and schema names are lowercase Postgres identifiers. orders_audit: order endpoints; review_audit: review endpoints; home_audit: home screen endpoints; posts_audit: posts endpoints (none yet, so no steps).",
   "orders_audit": {
-    "stepNameList": ["ordersUserAll", "ordersUserKitchen", "ordersUserSociety", "ordersDetails"],
+    "stepNameList": ["ordersUserAll", "ordersUserKitchen", "ordersUserSociety", "ordersDetails", "ordersReview"],
     "auditflag": true,
     "rollingSize": 10000
   },
@@ -12,6 +12,11 @@
   },
   "home_audit": {
     "stepNameList": ["homeKitchenSocietyAll", "homePinnedUpdate", "homeKitchenLive", "homeKitchenPreorder"],
+    "auditflag": true,
+    "rollingSize": 10000
+  },
+  "posts_audit": {
+    "stepNameList": [],
     "auditflag": true,
     "rollingSize": 10000
   }

@@ -14,7 +14,7 @@ from app.steps import AuditWriter, audit_writer
 from packages.audit import load_audit_config
 from packages.database import engine
 
-AUDIT_TABLES = ("orders_audit", "review_audit", "home_audit")
+AUDIT_TABLES = tuple(load_audit_config().tables)  # every table in audit.json
 
 
 @pytest.fixture
@@ -51,12 +51,16 @@ def _rows(table: str, request_id: str) -> list[dict]:
 def test_every_audited_step_is_in_audit_json():
     config = load_audit_config()
     for step in ("ordersUserAll", "ordersUserKitchen", "ordersUserSociety", "ordersDetails",
+                 "ordersReview",
                  "homeKitchenSocietyAll", "homePinnedUpdate", "homeKitchenLive", "homeKitchenPreorder",
                  "reviewUserAll", "reviewKitchen", "reviewDish", "reviewEdit", "reviewLikeCounter"):
         assert config.table_for(step) is not None, step
     assert config.table_for("ordersUserAll").name == "orders_audit"
     assert config.table_for("homePinnedUpdate").name == "home_audit"
     assert config.table_for("reviewEdit").name == "review_audit"
+    assert config.table_for("ordersReview").name == "orders_audit"
+    assert set(config.tables) == {"orders_audit", "review_audit", "home_audit", "posts_audit"}
+    assert config.tables["posts_audit"].step_names == ()  # no posts endpoints yet
 
 
 def test_success_and_failure_rows(client, data, audit_on):
@@ -89,6 +93,15 @@ def test_success_and_failure_rows(client, data, audit_on):
 
     [row] = _rows("review_audit", ids[3])
     assert row["step_name"] == "reviewLikeCounter" and "likes=1" in row["actual_log"]
+
+
+def test_order_review_is_audited(client, data, audit_on):
+    r = client.post("/app/orders/review", json={"order_id": str(data.order_b.order_id), "rating": 4})
+    assert r.status_code == 201
+    assert audit_writer.flush(timeout=60)
+    [row] = _rows("orders_audit", r.headers["X-Request-ID"])
+    assert row["step_name"] == "ordersReview" and row["error_log"] is None
+    assert f"review {r.json()['review_id']} saved" in row["actual_log"]
 
 
 def test_cart_and_account_are_logged_not_audited(client, data, audit_on, caplog):

@@ -9,6 +9,14 @@ class NotFoundError(Exception):
         super().__init__(self.detail)
 
 
+class ConflictError(Exception):
+    """The request clashes with the current state, e.g. reviewing an order twice (HTTP 409)."""
+
+    def __init__(self, detail: str) -> None:
+        self.detail = detail
+        super().__init__(detail)
+
+
 class InvalidInputError(Exception):
     """The body is well-formed but asks for something not allowed (HTTP 422)."""
 

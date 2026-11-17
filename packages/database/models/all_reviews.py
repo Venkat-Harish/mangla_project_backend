@@ -37,8 +37,9 @@ class Review(Base):
     dish_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("all_dishes.dish_id"), nullable=False
     )
+    # One review per order (unique all_reviews_order_id_key); orders.review_id points back here
     order_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("orders.order_id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("orders.order_id"), nullable=False, unique=True
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False

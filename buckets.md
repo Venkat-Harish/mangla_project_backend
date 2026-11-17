@@ -44,7 +44,7 @@ reviews_photos_and_videos/
 
 - **users/**: holds one folder per user.
 - **users/<user_id>/**: every photo and video that user has added to any of their reviews.
-- **Database:** their URLs are stored in `all_reviews.images`.
+- **Database:** their paths (e.g. `users/<user_id>/<file>`) are stored in `all_reviews.images`. A new review gets them from `/orders/review` `images[]`; an existing one from `/review/edit` `add_images[]`.
 
 ---
 
@@ -82,4 +82,4 @@ dish_and_kitchen_photos_videos/
 
 - **kitchen_display_pics/<kitchen_id>/**: the kitchen's own display pictures, shown when a user opens that kitchen.
 - **dishes_pics/<kitchen_id>/<dish_id>/**: images of that one dish. The dish folder sits under the folder of the kitchen that offers it.
-- **Database:** dish image URLs are stored in `all_dishes.images`. `all_kitchens` has no column for display pictures yet.
+- **Database:** dish image paths are stored in `all_dishes.images`. `all_kitchens` has no column for display pictures yet.

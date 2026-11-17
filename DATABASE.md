@@ -30,6 +30,7 @@ Install deps: `pip install -r requirements.txt`
 | 8 | [home_audit](#home_audit) | Request audit: one row per (request ID, step) of the home screen endpoints | 2026-11-17 |
 | 9 | [posts](#posts) | Kitchen posts (text + image/video URLs), soft-deletable | 2026-11-18 |
 | 10 | [average_ratings](#average_ratings) | Per-dish review count, star total and average | 2026-11-18 |
+| 11 | [posts_audit](#posts_audit) | Request audit: one row per (request ID, step) of the posts endpoints (none yet) | 2026-11-18 |
 
 ## Auto-generated alphanumeric IDs
 
@@ -204,8 +205,9 @@ ALTER TABLE public.all_dishes ENABLE ROW LEVEL SECURITY;
 | order_status | text | no | | Free text |
 | payment_id | text | yes | | Payment gateway ID (e.g. `pay_...`) |
 | refund_flag | boolean | no | false | |
+| review_id | uuid | yes | | FK → all_reviews; the order's review, NULL = not reviewed yet. Set by `/orders/review` (one review per order). Added 2026-11-18 |
 
-**Keys / foreign keys:** PK `orders_pkey`; unique `orders_order_alphanumeric_id_key`; FKs `orders_kitchen_id_fkey`, `orders_dish_id_fkey`, `orders_user_id_fkey`; check `ck_orders_portion_count_positive`.
+**Keys / foreign keys:** PK `orders_pkey`; unique `orders_order_alphanumeric_id_key`, `orders_review_id_key`; FKs `orders_kitchen_id_fkey`, `orders_dish_id_fkey`, `orders_user_id_fkey`, `orders_review_id_fkey` (added with `ALTER TABLE` because orders and all_reviews reference each other; no ON DELETE action, so deleting a review must first clear `review_id` and call `record_rating_change`); check `ck_orders_portion_count_positive`.
 **Indexes:** `ix_orders_user_id_order_id` (user_id, order_id). user_id comes first so "all orders for a user" is fast; order_id alone is already indexed by the PK.
 **Trigger:** `orders_set_alnum_id`. **Row Level Security:** enabled, no policies.
 
@@ -232,13 +234,18 @@ CREATE INDEX ix_orders_user_id_order_id ON orders (user_id, order_id);
 CREATE TRIGGER orders_set_alnum_id BEFORE INSERT ON public.orders
 	FOR EACH ROW EXECUTE FUNCTION public.set_alnum_id('order_alphanumeric_id', 'ORD-');
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+-- added 2026-11-18 (scripts/migrate_orders_review_id.py)
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS review_id UUID;
+ALTER TABLE public.orders ADD CONSTRAINT orders_review_id_key UNIQUE (review_id);
+ALTER TABLE public.orders ADD CONSTRAINT orders_review_id_fkey
+	FOREIGN KEY (review_id) REFERENCES public.all_reviews (review_id);
 ```
 
 ---
 
 ## all_reviews
 
-**Purpose:** A user's review of a dish, tied to the order it came from. A user can review the same dish more than once.
+**Purpose:** A user's review of a dish, tied to the order it came from: one review per order (`/orders/review` creates it and sets `orders.review_id`). A user can review the same dish more than once, from different orders.
 **Model:** `packages/database/models/all_reviews.py` (`Review`)
 **Created:** 2026-11-16
 
@@ -247,7 +254,7 @@ ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 | review_id | uuid | no | gen_random_uuid() | Primary key |
 | review_alphanumeric_id | text | no | trigger | Unique, auto `REV-XXXXXXXX` |
 | dish_id | uuid | no | | FK → all_dishes |
-| order_id | uuid | no | | FK → orders |
+| order_id | uuid | no | | FK → orders; unique (one review per order, since 2026-11-18) |
 | user_id | uuid | no | | FK → users |
 | rating | numeric(2,1) | no | | Half stars 0.5–5.0 (Python `Decimal`) |
 | review_text | text | yes | | |
@@ -258,7 +265,7 @@ ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 | like_count | integer | no | 0 | ≥ 0 |
 | dislike_count | integer | no | 0 | ≥ 0 |
 
-**Keys / foreign keys:** PK `all_reviews_pkey`; unique `all_reviews_review_alphanumeric_id_key`; FKs `all_reviews_dish_id_fkey`, `all_reviews_order_id_fkey`, `all_reviews_user_id_fkey`; checks `ck_all_reviews_rating_half_stars`, `ck_all_reviews_like_count_nonnegative`, `ck_all_reviews_dislike_count_nonnegative`.
+**Keys / foreign keys:** PK `all_reviews_pkey`; unique `all_reviews_review_alphanumeric_id_key`, `all_reviews_order_id_key`; FKs `all_reviews_dish_id_fkey`, `all_reviews_order_id_fkey`, `all_reviews_user_id_fkey`; checks `ck_all_reviews_rating_half_stars`, `ck_all_reviews_like_count_nonnegative`, `ck_all_reviews_dislike_count_nonnegative`.
 **Indexes:** `ix_all_reviews_dish_id_review_id` (dish_id, review_id) and `ix_all_reviews_user_id_review_id` (user_id, review_id), which make "reviews for a dish" and "reviews by a user" fast.
 **Triggers:** `all_reviews_set_alnum_id`; `all_reviews_set_last_edited` (BEFORE UPDATE, function `public.set_review_last_edited()`). Like/dislike updates don't count as edits. **Row Level Security:** enabled, no policies.
 
@@ -293,6 +300,8 @@ CREATE TRIGGER all_reviews_set_alnum_id BEFORE INSERT ON public.all_reviews
 CREATE TRIGGER all_reviews_set_last_edited BEFORE UPDATE ON public.all_reviews
 	FOR EACH ROW EXECUTE FUNCTION public.set_review_last_edited();
 ALTER TABLE public.all_reviews ENABLE ROW LEVEL SECURITY;
+-- added 2026-11-18 (scripts/migrate_orders_review_id.py)
+ALTER TABLE public.all_reviews ADD CONSTRAINT all_reviews_order_id_key UNIQUE (order_id);
 ```
 
 ---
@@ -372,7 +381,7 @@ ALTER TABLE public.posts ENABLE ROW LEVEL SECURITY;
 - **The backend** updates `total_reviews_count` and `total_stars` whenever a review is added, its rating changes, or it's deleted. For example, adding a 4.5 means `count + 1` and `stars + 4.5`.
   - It does this only through `record_rating_change(session, dish_id, old_rating, new_rating)` in `app/services/ratings.py`, called in the same transaction as the review write. Pass `old_rating=None` for a new review and `new_rating=None` for a deleted one.
   - The function is one atomic UPDATE, so concurrent requests can't lose updates.
-  - No endpoint changes ratings yet: `/review/edit` only edits text and images. A future create, delete or re-rate endpoint must call it.
+  - `/orders/review` calls it for each new review. `/review/edit` only edits text and images, so it doesn't. A future delete or re-rate endpoint must call it too.
 - **The database** computes `average_rating` from those two totals.
 - **The database** keeps exactly one row per dish:
   - existing dishes were backfilled with 0 reviews
@@ -408,10 +417,10 @@ ALTER TABLE public.average_ratings ENABLE ROW LEVEL SECURITY;
 
 ## Audit tables
 
-`orders_audit`, `review_audit` and `home_audit` share one shape: one row per (request ID, step name), written by `packages/audit` (`from packages.audit import audit`; `audit.record(request_id, step_name, log_col)` inserts the row, `audit.update(request_id, step_name, error_column=..., log_col=...)` overwrites its logs, and `audit.write(...)` writes a finished step's whole row in one upsert). The request ID is the uuid the API creates for each request.
+`orders_audit`, `review_audit`, `home_audit` and `posts_audit` share one shape: one row per (request ID, step name), written by `packages/audit` (`from packages.audit import audit`; `audit.record(request_id, step_name, log_col)` inserts the row, `audit.update(request_id, step_name, error_column=..., log_col=...)` overwrites its logs, and `audit.write(...)` writes a finished step's whole row in one upsert). The request ID is the uuid the API creates for each request.
 
 - **How the API writes them:** `app/steps.py` (`audit_step`) writes one row when each audited step ends, with `audit.write`: `timestamp` = when the step started, `actual_log` = `<inputs as JSON> -> <result> (<ms> ms)`, and on failure `error_log` = `<Error>: <message>`. Rows go through a background thread and a small connection pool of their own (`audit.*` in `app.properties`).
-- **Step names → table:** `packages/audit/audit.json`. Each table lists its steps in `stepNameList`; the step name alone picks the table, and a step listed nowhere is not written. `auditflag: false` turns a table off. Today: `orders_audit` ← ordersUserAll, ordersUserKitchen, ordersUserSociety, ordersDetails; `home_audit` ← homeKitchenSocietyAll, homePinnedUpdate, homeKitchenLive, homeKitchenPreorder; `review_audit` ← reviewUserAll, reviewKitchen, reviewDish, reviewEdit, reviewLikeCounter.
+- **Step names → table:** `packages/audit/audit.json`. Each table lists its steps in `stepNameList`; the step name alone picks the table, and a step listed nowhere is not written. `auditflag: false` turns a table off. Today: `orders_audit` ← ordersUserAll, ordersUserKitchen, ordersUserSociety, ordersDetails, ordersReview; `home_audit` ← homeKitchenSocietyAll, homePinnedUpdate, homeKitchenLive, homeKitchenPreorder; `review_audit` ← reviewUserAll, reviewKitchen, reviewDish, reviewEdit, reviewLikeCounter; `posts_audit` ← none yet (no posts endpoints).
 - **Rolling size:** each table keeps at most `rollingSize` rows (10000), deleting the oldest whole requests past that. `record()` trims after every insert; `write()` trims on a table's first write and then every 100 writes, so a table can briefly hold up to 99 rows more.
 - **Definition:** `build_audit_table` in `packages/audit/audit_store.py` (Core table, no ORM model). The same definition creates the tables.
 - **Script:** `scripts/create_audit_tables.py`. Run from `mangla_backend/`: `python -m scripts.create_audit_tables`. It creates every table in `audit.json` that does not exist yet and enables RLS. Safe to re-run; existing tables are not changed.
@@ -508,6 +517,37 @@ CREATE TABLE public.home_audit (
 	CONSTRAINT home_audit_pkey PRIMARY KEY (request_id, step_name)
 );
 ALTER TABLE public.home_audit ENABLE ROW LEVEL SECURITY;
+```
+
+---
+
+## posts_audit
+
+**Purpose:** Audit rows for the posts endpoints (there are none yet, so its `stepNameList` is empty): one row per request and step, with the step's log and error.
+**Definition:** `packages/audit/audit_store.py` (`build_audit_table`), created by `scripts/create_audit_tables.py`
+**Created:** 2026-11-18
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| request_id | uuid | no | | The request's uuid (from the API); PK part 1 |
+| timestamp | timestamptz | no | now() | When the step started (the API passes it; now() if not given); ISO 8601 with time zone |
+| step_name | text | no | | A step from `posts_audit.stepNameList` in `audit.json`; PK part 2 |
+| actual_log | text | yes | | The step's log (`log_col`), masked like the log files |
+| error_log | text | yes | | The step's error (`error_column`); null if it succeeded |
+
+**Keys / foreign keys:** PK `posts_audit_pkey` (request_id, step_name); no foreign keys.
+**Indexes:** only the PK. **Row Level Security:** enabled, no policies.
+
+```sql
+CREATE TABLE public.posts_audit (
+	request_id UUID NOT NULL,
+	timestamp TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+	step_name TEXT NOT NULL,
+	actual_log TEXT,
+	error_log TEXT,
+	CONSTRAINT posts_audit_pkey PRIMARY KEY (request_id, step_name)
+);
+ALTER TABLE public.posts_audit ENABLE ROW LEVEL SECURITY;
 ```
 
 ---

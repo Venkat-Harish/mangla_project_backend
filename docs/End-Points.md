@@ -1,7 +1,7 @@
 # API Endpoints
 
 All endpoints are `POST` with a JSON body, mounted under `api.prefix` (default `/app`), e.g. `POST /app/account/user-info`.
-IDs are UUIDs. `?` = optional. Errors: `404` not found, `422` invalid body or input not allowed, `502` file storage unavailable (all include `request_id`).
+IDs are UUIDs. `?` = optional. Errors: `404` not found, `409` conflicts with the current state (e.g. order already reviewed), `422` invalid body or input not allowed, `502` file storage unavailable (all include `request_id`). Success is `200`, except `201` for `/orders/review`, which creates a review.
 
 ## Media files
 Photos and videos live in private Supabase Storage buckets ([buckets.md](../buckets.md)); `packages/storage` does every Storage call.
@@ -9,15 +9,15 @@ Photos and videos live in private Supabase Storage buckets ([buckets.md](../buck
 | Field | Bucket | Path of each file |
 |---|---|---|
 | Dish `images` (Cart, Home) | `dish_and_kitchen_photos_videos` | `dishes_pics/<kitchen_id>/<dish_id>/<file>` |
-| Review `images`, `/review/edit` `add_images[]` / `remove_images[]` | `reviews_photos_and_videos` | `users/<user_id>/<file>` (the reviewer's `user_id`) |
+| Review `images`, `/orders/review` `images[]`, `/review/edit` `add_images[]` / `remove_images[]` | `reviews_photos_and_videos` | `users/<user_id>/<file>` (the reviewer's `user_id`; for `/orders/review`, the order's user) |
 
 - The database stores each file's **path** inside its bucket. Every `images` field in an output is a list of **Image**: `{path, url}`. `url` is a signed URL, valid for `storage.signed_url_seconds` (app.properties, default 3600 s); it is `null` when the file can't be signed (not uploaded, or Storage down), and the rest of the response is still returned.
-- Inputs that name images (`add_images[]`, `remove_images[]`) take **paths**, the `path` of an Image.
+- Inputs that name images (`images[]`, `add_images[]`, `remove_images[]`) take **paths**, the `path` of an Image.
 - Allowed file types: `jpg jpeg png webp heic gif mp4 mov webm`.
 - **Uploading** (folders appear with their first file; nothing to create):
   1. `/media/upload-url` with the file names: returns a `path` and an `upload_url` per file.
   2. `PUT` each file's bytes to its `upload_url` (valid for 2 hours).
-  3. Send the paths to the endpoint that saves them, e.g. `/review/edit` `add_images[]`.
+  3. Send the paths to the endpoint that saves them: `/orders/review` `images[]` for a new review, `/review/edit` `add_images[]` for an existing one.
 
 ## Account
 | Endpoint | Input | Output | Description |
@@ -49,8 +49,9 @@ Dish: `dish_id, dish_name, dish_price, images` (Image[]) `, description, active_
 | `/orders/user-kitchen` | `user_id`, `kitchen_id` | Order[] + `kitchen_name, dish_name` | User's orders from one kitchen. |
 | `/orders/user-society` | `user_id`, `society_id?` | Order[] + `kitchen_name, dish_name` | User's orders in a society (default: user's own). |
 | `/orders/details` | `order_id` | Order | One order, every column. |
+| `/orders/review` | `order_id`, `rating` (0.5–5 in 0.5 steps), `description?`, `images[]?` (paths, max 10), `anonymous_flag?` (default `false`) | Review (`201`) | Review the order: the order's user reviews its dish, once per order. Saves a new review (`description` is stored as `review_text`), sets the order's `review_id`, and adds the rating to the dish's average. Only orders whose `order_status` is in `review.allowed_order_statuses` (app.properties, default `delivered,completed`, any case) can be reviewed, else `422`. Each image must already be uploaded to `users/<order user_id>/`, else `422`. `404` unknown order, `409` already reviewed. An anonymous review hides `user_id`, `user_name` and `order_id` in the response. |
 
-Order: `order_id, order_alphanumeric_id, kitchen_id, dish_id, user_id, portion_count, order_time, order_status, payment_id, refund_flag`
+Order: `order_id, order_alphanumeric_id, kitchen_id, dish_id, user_id, portion_count, order_time, order_status, payment_id, refund_flag, review_id` (`review_id` is null until the order is reviewed)
 
 ## Review
 | Endpoint | Input | Output | Description |

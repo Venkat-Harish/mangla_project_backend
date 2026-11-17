@@ -94,7 +94,7 @@ def edit(
         if reviewer is None:
             raise NotFoundError("Review", review_id)
         if add_images:
-            _check_uploaded(reviewer, add_images)  # before the row lock: it calls Storage
+            check_uploaded(reviewer, add_images, "add_images")  # before the row lock: it calls Storage
         review = session.scalars(
             select(Review).where(Review.review_id == review_id).with_for_update()
         ).first()
@@ -122,20 +122,25 @@ def edit(
         step.done(", ".join(changes))
         # The request names no requester, so an anonymous review stays anonymous here too;
         # otherwise any client could unmask a reviewer with an edit that changes nothing.
-        return _run(session, _reviews().where(Review.review_id == review_id),
-                    hide_anonymous=True)[0]
+        return review_out(session, review_id, hide_anonymous=True)
 
 
-def _check_uploaded(user_id: uuid.UUID, paths: list[str]) -> None:
-    """Every path must be a file directly in the reviewer's folder, and uploaded already."""
+def review_out(session: Session, review_id: uuid.UUID, hide_anonymous: bool) -> ReviewOut:
+    """One review as the review endpoints return it (dish, kitchen, reviewer, signed images)."""
+    return _run(session, _reviews().where(Review.review_id == review_id), hide_anonymous)[0]
+
+
+def check_uploaded(user_id: uuid.UUID, paths: list[str], field: str) -> None:
+    """Every path must be a file directly in the reviewer's folder, and uploaded already.
+    field names the request field in the 422 message. Calls Storage: don't hold row locks."""
     folder = storage.folder("review", user_id=user_id)
     outside = [p for p in paths if not storage.is_in_folder("review", p, user_id=user_id)]
     if outside:
-        raise InvalidInputError(f"add_images must be photo or video files in {folder}: {outside}")
+        raise InvalidInputError(f"{field} must be photo or video files in {folder}: {outside}")
     uploaded = storage.existing_files("review", user_id=user_id)
     missing = [p for p in dict.fromkeys(paths) if p not in uploaded]
     if missing:
-        raise InvalidInputError(f"add_images not uploaded yet: {missing}")
+        raise InvalidInputError(f"{field} not uploaded yet: {missing}")
 
 
 def like_counter(session: Session, review_id: uuid.UUID, like_flag: int) -> LikeCountsOut:

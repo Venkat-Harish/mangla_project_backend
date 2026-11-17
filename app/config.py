@@ -36,6 +36,7 @@ class Settings:
     audit_max_pending: int
     audit_flush_timeout_seconds: float
     storage_signed_url_seconds: int
+    review_allowed_order_statuses: frozenset[str]  # casefolded
 
 
 @cache
@@ -61,4 +62,9 @@ def get_settings(path: Path = PROPERTIES_FILE) -> Settings:
         audit_max_pending=int(p.get("audit.max_pending", "10000")),
         audit_flush_timeout_seconds=float(p.get("audit.flush_timeout_seconds", "10")),
         storage_signed_url_seconds=int(p.get("storage.signed_url_seconds", "3600")),
+        review_allowed_order_statuses=frozenset(
+            s.strip().casefold()
+            for s in p.get("review.allowed_order_statuses", "delivered,completed").split(",")
+            if s.strip()
+        ),
     )

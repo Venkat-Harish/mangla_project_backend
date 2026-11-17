@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, model_validator
 
-from app.schemas.common import ImageOut, ORMModel
+from app.schemas.common import ImageOut, ORMModel, StorableText
 
 
 class KitchenIdIn(BaseModel):
@@ -17,10 +17,10 @@ class DishIdIn(BaseModel):
 
 class ReviewEditIn(BaseModel):
     review_id: uuid.UUID
-    review_text: str | None = None  # None = keep the current text
+    review_text: StorableText | None = None  # None = keep the current text
     # paths in reviews_photos_and_videos, e.g. 'users/<reviewer user_id>/<name>.jpg'
-    add_images: list[str] = []  # each must be uploaded already, in the reviewer's folder
-    remove_images: list[str] = []
+    add_images: list[StorableText] = []  # each must be uploaded already, in the reviewer's folder
+    remove_images: list[StorableText] = []
 
     @model_validator(mode="after")
     def something_to_change(self):

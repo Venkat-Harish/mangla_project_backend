@@ -1,7 +1,7 @@
 """Media: signed upload URLs for photos and videos (packages.storage). Logged, not audited.
 
 The app asks for upload URLs, PUTs each file to its URL, then sends the returned paths to the
-endpoint that saves them (e.g. /review/edit add_images).
+endpoint that saves them (/orders/review images for a new review, /review/edit add_images).
 """
 
 import uuid

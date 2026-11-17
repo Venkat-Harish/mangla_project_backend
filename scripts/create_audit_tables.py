@@ -1,6 +1,6 @@
 """Create the audit tables listed in packages/audit/audit.json in Supabase.
 
-Today: orders_audit, review_audit, home_audit (public schema). Each table has the 5 columns of
+Today: orders_audit, review_audit, home_audit, posts_audit (public schema). Each table has the 5 columns of
 packages/audit/audit_store.py's build_audit_table (the same definition the audit writes use),
 primary key (request_id, step_name), and Row Level Security enabled with no policies.
 Run from mangla_backend/:  python -m scripts.create_audit_tables
