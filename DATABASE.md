@@ -7,12 +7,12 @@ Tables are created one at a time. Each table is defined as a SQLAlchemy ORM mode
 Code layout (`packages/database/`):
 - `db.py`: the single engine, `SessionLocal`, `get_session()` and `run_query(sql, params)`
 - `base.py`: the `Base` class all models inherit from
-- `ddl.py`: database-level SQL create_all can't express (alphanumeric-ID function and trigger, review edit-time trigger, RLS), hooked in with SQLAlchemy DDL events
-- `models/`: one ORM model file per table (`users.py`, `all_kitchens.py`, `all_dishes.py`, `orders.py`, `all_reviews.py`)
+- `ddl.py`: database-level SQL create_all can't express (alphanumeric-ID function and trigger, last-edited and soft-delete triggers, average_ratings row sync, RLS), hooked in with SQLAlchemy DDL events
+- `models/`: one ORM model file per table (`users.py`, `all_kitchens.py`, `all_dishes.py`, `orders.py`, `all_reviews.py`, `posts.py`, `average_ratings.py`)
 
 Import everything from the package: `from packages.database import get_session, User, Review`.
 
-To create any new tables: `Base.metadata.create_all(engine)`. It skips tables that already exist.
+To create any new tables: `python -m scripts.create_tables` (runs `Base.metadata.create_all`). It skips tables that already exist.
 
 Install deps: `pip install -r requirements.txt`
 
@@ -28,14 +28,16 @@ Install deps: `pip install -r requirements.txt`
 | 6 | [orders_audit](#orders_audit) | Request audit: one row per (request ID, step) of the order endpoints | 2026-11-17 |
 | 7 | [review_audit](#review_audit) | Request audit: one row per (request ID, step) of the review endpoints | 2026-11-17 |
 | 8 | [home_audit](#home_audit) | Request audit: one row per (request ID, step) of the home screen endpoints | 2026-11-17 |
+| 9 | [posts](#posts) | Kitchen posts (text + image/video URLs), soft-deletable | 2026-11-18 |
+| 10 | [average_ratings](#average_ratings) | Per-dish review count, star total and average | 2026-11-18 |
 
 ## Auto-generated alphanumeric IDs
 
-`all_kitchens.kitchen_alphanumeric_id` (`KIT-XXXXXXXX`), `orders.order_alphanumeric_id` (`ORD-XXXXXXXX`) and `all_reviews.review_alphanumeric_id` (`REV-XXXXXXXX`) are filled in by the database on insert. Leave them out when creating a row; the ORM reads the value back automatically.
+`all_kitchens.kitchen_alphanumeric_id` (`KIT-XXXXXXXX`), `orders.order_alphanumeric_id` (`ORD-XXXXXXXX`), `all_reviews.review_alphanumeric_id` (`REV-XXXXXXXX`) and `posts.post_alphanumeric_id` (`PST-XXXXXXXX`) are filled in by the database on insert. Leave them out when creating a row; the ORM reads the value back automatically.
 
 - `public.generate_alnum_code(prefix, len = 8)`: prefix + 8 random characters from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (no 0/O/1/I), about 1.1 trillion combinations. The randomness comes from `gen_random_uuid()`.
 - `public.set_alnum_id()`: BEFORE INSERT trigger function with arguments (column, prefix). If the column is empty, it generates a code and retries until the code isn't already in the table. The column's UNIQUE constraint is a final safety net.
-- Triggers: `all_kitchens_set_alnum_id`, `orders_set_alnum_id`, `all_reviews_set_alnum_id`.
+- Triggers: `all_kitchens_set_alnum_id`, `orders_set_alnum_id`, `all_reviews_set_alnum_id`, `posts_set_alnum_id`.
 - Full SQL is in `packages/database/ddl.py`.
 
 ---
@@ -291,6 +293,112 @@ CREATE TRIGGER all_reviews_set_alnum_id BEFORE INSERT ON public.all_reviews
 CREATE TRIGGER all_reviews_set_last_edited BEFORE UPDATE ON public.all_reviews
 	FOR EACH ROW EXECUTE FUNCTION public.set_review_last_edited();
 ALTER TABLE public.all_reviews ENABLE ROW LEVEL SECURITY;
+```
+
+---
+
+## posts
+
+**Purpose:** Posts a kitchen publishes (text plus images/videos). Deleting is a soft delete: the row stays and is flagged.
+**Model:** `packages/database/models/posts.py` (`Post`)
+**Created:** 2026-11-18
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| post_id | uuid | no | gen_random_uuid() | Primary key |
+| post_alphanumeric_id | text | no | trigger | Unique, auto `PST-XXXXXXXX` |
+| kitchen_id | uuid | no | | FK → all_kitchens |
+| description | text | yes | | |
+| media_urls | jsonb | no | `'[]'` | List of Supabase Storage URLs (images and/or videos) |
+| posted_time | timestamptz | no | now() | ISO 8601 with time zone |
+| last_edited_time | timestamptz | yes | trigger | Set when description or media_urls change; null if never edited |
+| post_deleted_flag | boolean | no | false | Soft delete |
+| post_deleted_time | timestamptz | yes | trigger | Set when the flag turns on, cleared when it turns off |
+
+**Keys / foreign keys:** PK `posts_pkey`; unique `posts_post_alphanumeric_id_key`; FK `posts_kitchen_id_fkey` → all_kitchens; check `ck_posts_deleted_time_matches_flag` (deleted time is set exactly when the flag is on).
+**Indexes:** `ix_posts_kitchen_id_post_id` (kitchen_id, post_id) and `ix_posts_post_deleted_flag_post_id` (post_deleted_flag, post_id).
+**Triggers:**
+- `posts_set_alnum_id`
+- `posts_set_last_edited`: BEFORE UPDATE, `public.set_last_edited_on_change('description', 'media_urls')`. This generic function stamps `last_edited_time` when any column named in its arguments changes.
+- `posts_set_deleted_time`: BEFORE INSERT OR UPDATE, `public.set_post_deleted_time()`.
+
+Deleting or restoring a post doesn't count as an edit.
+**Row Level Security:** enabled, no policies.
+
+```sql
+CREATE TABLE posts (
+	post_id UUID DEFAULT gen_random_uuid() NOT NULL,
+	post_alphanumeric_id TEXT NOT NULL,
+	kitchen_id UUID NOT NULL,
+	description TEXT,
+	media_urls JSONB DEFAULT '[]'::jsonb NOT NULL,
+	posted_time TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+	last_edited_time TIMESTAMP WITH TIME ZONE,
+	post_deleted_flag BOOLEAN DEFAULT false NOT NULL,
+	post_deleted_time TIMESTAMP WITH TIME ZONE,
+	PRIMARY KEY (post_id),
+	CONSTRAINT ck_posts_deleted_time_matches_flag CHECK (post_deleted_flag = (post_deleted_time IS NOT NULL)),
+	UNIQUE (post_alphanumeric_id),
+	FOREIGN KEY(kitchen_id) REFERENCES all_kitchens (kitchen_id)
+);
+CREATE INDEX ix_posts_kitchen_id_post_id ON posts (kitchen_id, post_id);
+CREATE INDEX ix_posts_post_deleted_flag_post_id ON posts (post_deleted_flag, post_id);
+CREATE TRIGGER posts_set_alnum_id BEFORE INSERT ON public.posts
+	FOR EACH ROW EXECUTE FUNCTION public.set_alnum_id('post_alphanumeric_id', 'PST-');
+CREATE TRIGGER posts_set_last_edited BEFORE UPDATE ON public.posts
+	FOR EACH ROW EXECUTE FUNCTION public.set_last_edited_on_change('description', 'media_urls');
+CREATE TRIGGER posts_set_deleted_time BEFORE INSERT OR UPDATE ON public.posts
+	FOR EACH ROW EXECUTE FUNCTION public.set_post_deleted_time();
+ALTER TABLE public.posts ENABLE ROW LEVEL SECURITY;
+```
+
+---
+
+## average_ratings
+
+**Purpose:** One row per dish with its review count, star total and average rating.
+**Model:** `packages/database/models/average_ratings.py` (`AverageRating`)
+**Created:** 2026-11-18
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| dish_id | uuid | no | | Primary key; FK → all_dishes, ON DELETE CASCADE |
+| total_reviews_count | integer | no | 0 | ≥ 0 |
+| total_stars | numeric(10,1) | no | 0 | Sum of review ratings (half stars) |
+| average_rating | numeric(3,2) | yes | generated | `round(total_stars / total_reviews_count, 2)`; NULL when there are no reviews. Read-only. |
+| kitchen_id | uuid | no | | FK → all_kitchens; the dish's kitchen |
+
+**Who maintains what:**
+- **The backend** updates `total_reviews_count` and `total_stars` whenever a review is added, its rating changes, or it's deleted. For example, adding a 4.5 means `count + 1` and `stars + 4.5`.
+- **The database** computes `average_rating` from those two totals.
+- **The database** keeps exactly one row per dish:
+  - existing dishes were backfilled with 0 reviews
+  - trigger `all_dishes_sync_average_rating` (AFTER INSERT OR UPDATE OF kitchen_id on all_dishes, function `public.sync_average_rating_row()`) adds a row for every new dish and keeps `kitchen_id` in step with the dish
+  - deleting a dish deletes its row
+
+**Keys / foreign keys:** PK `average_ratings_pkey` (dish_id); FKs `average_ratings_dish_id_fkey` (ON DELETE CASCADE), `average_ratings_kitchen_id_fkey`; checks `ck_average_ratings_total_reviews_count_nonnegative` and `ck_average_ratings_total_stars_in_range` (total stars between 0.5× and 5× the review count, so 0 when there are no reviews).
+**Indexes:** `ix_average_ratings_kitchen_id_dish_id` (kitchen_id, dish_id). dish_id alone is already indexed by the PK.
+**Row Level Security:** enabled, no policies.
+
+```sql
+CREATE TABLE average_ratings (
+	dish_id UUID NOT NULL,
+	total_reviews_count INTEGER DEFAULT 0 NOT NULL,
+	total_stars NUMERIC(10, 1) DEFAULT 0 NOT NULL,
+	average_rating NUMERIC(3, 2) GENERATED ALWAYS AS (CASE WHEN total_reviews_count > 0 THEN round(total_stars / total_reviews_count, 2) END) STORED,
+	kitchen_id UUID NOT NULL,
+	PRIMARY KEY (dish_id),
+	CONSTRAINT ck_average_ratings_total_reviews_count_nonnegative CHECK (total_reviews_count >= 0),
+	CONSTRAINT ck_average_ratings_total_stars_in_range CHECK (total_stars >= 0.5 * total_reviews_count AND total_stars <= 5 * total_reviews_count),
+	FOREIGN KEY(dish_id) REFERENCES all_dishes (dish_id) ON DELETE CASCADE,
+	FOREIGN KEY(kitchen_id) REFERENCES all_kitchens (kitchen_id)
+);
+CREATE INDEX ix_average_ratings_kitchen_id_dish_id ON average_ratings (kitchen_id, dish_id);
+INSERT INTO public.average_ratings (dish_id, kitchen_id)
+	SELECT dish_id, kitchen_id FROM public.all_dishes ON CONFLICT (dish_id) DO NOTHING;
+CREATE TRIGGER all_dishes_sync_average_rating AFTER INSERT OR UPDATE OF kitchen_id ON public.all_dishes
+	FOR EACH ROW EXECUTE FUNCTION public.sync_average_rating_row();
+ALTER TABLE public.average_ratings ENABLE ROW LEVEL SECURITY;
 ```
 
 ---

@@ -112,6 +112,110 @@ def add_review_edit_trigger(table: Table) -> None:
     ))
 
 
+# Generic BEFORE UPDATE trigger: stamp last_edited_time when any of the columns
+# passed as trigger arguments (TG_ARGV) change. The table needs a last_edited_time column.
+SET_LAST_EDITED_ON_CHANGE = DDL("""
+CREATE OR REPLACE FUNCTION public.set_last_edited_on_change()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  new_row jsonb := to_jsonb(NEW);
+  old_row jsonb := to_jsonb(OLD);
+  i integer;
+BEGIN
+  FOR i IN 0..TG_NARGS - 1 LOOP
+    IF new_row -> TG_ARGV[i] IS DISTINCT FROM old_row -> TG_ARGV[i] THEN
+      NEW.last_edited_time := now();
+      EXIT;
+    END IF;
+  END LOOP;
+  RETURN NEW;
+END
+$$;
+""")
+
+
+def add_last_edited_trigger(table: Table, *columns: str) -> None:
+    """Auto-set last_edited_time when any of `columns` change."""
+    args = ", ".join(f"'{c}'" for c in columns)
+    event.listen(table, "before_create", SET_LAST_EDITED_ON_CHANGE)
+    event.listen(table, "after_create", DDL(
+        f"CREATE TRIGGER {table.name}_set_last_edited BEFORE UPDATE ON public.{table.name} "
+        f"FOR EACH ROW EXECUTE FUNCTION public.set_last_edited_on_change({args})"
+    ))
+
+
+# BEFORE INSERT OR UPDATE trigger for posts: post_deleted_time follows post_deleted_flag.
+# Set to now() when the flag turns on (kept if it was already on), cleared when it turns off.
+SET_POST_DELETED_TIME = DDL("""
+CREATE OR REPLACE FUNCTION public.set_post_deleted_time()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  IF NOT NEW.post_deleted_flag THEN
+    NEW.post_deleted_time := NULL;
+  ELSIF TG_OP = 'INSERT' THEN
+    NEW.post_deleted_time := coalesce(NEW.post_deleted_time, now());
+  ELSIF NOT OLD.post_deleted_flag THEN
+    NEW.post_deleted_time := now();
+  ELSE
+    NEW.post_deleted_time := OLD.post_deleted_time;
+  END IF;
+  RETURN NEW;
+END
+$$;
+""")
+
+
+def add_post_deleted_time_trigger(table: Table) -> None:
+    """Auto-set/clear post_deleted_time from post_deleted_flag."""
+    event.listen(table, "before_create", SET_POST_DELETED_TIME)
+    event.listen(table, "after_create", DDL(
+        f"CREATE TRIGGER {table.name}_set_deleted_time BEFORE INSERT OR UPDATE ON public.{table.name} "
+        f"FOR EACH ROW EXECUTE FUNCTION public.set_post_deleted_time()"
+    ))
+
+
+# AFTER INSERT OR UPDATE OF kitchen_id on all_dishes: every dish has an average_ratings row
+# (zero counts) and its kitchen_id follows the dish. The counts themselves are kept up to
+# date by the backend.
+SYNC_AVERAGE_RATING_ROW = DDL("""
+CREATE OR REPLACE FUNCTION public.sync_average_rating_row()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO public.average_ratings (dish_id, kitchen_id)
+    VALUES (NEW.dish_id, NEW.kitchen_id)
+    ON CONFLICT (dish_id) DO NOTHING;
+  ELSE
+    UPDATE public.average_ratings SET kitchen_id = NEW.kitchen_id WHERE dish_id = NEW.dish_id;
+  END IF;
+  RETURN NEW;
+END
+$$;
+""")
+
+
+def add_average_rating_rows(table: Table) -> None:
+    """When average_ratings is created: backfill a row per existing dish and keep one per new dish."""
+    event.listen(table, "after_create", SYNC_AVERAGE_RATING_ROW)
+    event.listen(table, "after_create", DDL(
+        f"INSERT INTO public.{table.name} (dish_id, kitchen_id) "
+        f"SELECT dish_id, kitchen_id FROM public.all_dishes ON CONFLICT (dish_id) DO NOTHING"
+    ))
+    event.listen(table, "after_create", DDL(
+        "CREATE TRIGGER all_dishes_sync_average_rating AFTER INSERT OR UPDATE OF kitchen_id "
+        "ON public.all_dishes FOR EACH ROW EXECUTE FUNCTION public.sync_average_rating_row()"
+    ))
+
+
 def enable_rls(table: Table) -> None:
     """Turn on Row Level Security (no policies: blocks Supabase's public API)."""
     event.listen(table, "after_create", DDL(
