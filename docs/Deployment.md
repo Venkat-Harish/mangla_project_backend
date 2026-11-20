@@ -38,8 +38,8 @@ How it signs in (no stored password or secret):
 
 | Piece | Value |
 |---|---|
-| Managed identity | `mangla-github-deploy` (user-assigned, resource group `food-service`) |
-| Federated credential subject | `repo:Venkat-Harish/mangla_project_backend:environment:production` (issuer `https://token.actions.githubusercontent.com`, audience `api://AzureADTokenExchange`) |
+| Managed identity | `github-deployer-mangla` (user-assigned, resource group `food-service`) |
+| Federated credential subject | `repo:Venkat-Harish@75791505/mangla_project_backend@1460410707:environment:production` (the repo uses GitHub's immutable-ID subject format) (issuer `https://token.actions.githubusercontent.com`, audience `api://AzureADTokenExchange`) |
 | Role | Website Contributor on the Function App `mangla-project` |
 | GitHub environment `production` | Required reviewers, deployment branch `main`. Secrets `AZURE_CLIENT_ID` (the identity's client ID), `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` |
 
