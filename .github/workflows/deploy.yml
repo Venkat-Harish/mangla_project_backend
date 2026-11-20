@@ -1,0 +1,90 @@
+# Deploys the backend to the Azure Function App mangla-project on every push to main.
+# The deploy job runs in the "production" environment, which has required reviewers:
+# it waits until someone approves it in the Actions tab. Setup: docs/Deployment.md (CI/CD).
+name: Deploy to Azure Functions
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["docs/**", "**.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write   # OIDC token for azure/login (federated credential, no stored secret)
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  APP_NAME: mangla-project
+  APP_URL: https://mangla-project-bfaec0ayddazhdcm.southindia-01.azurewebsites.net
+  PYTHON_VERSION: "3.14"   # the Function App's runtime
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Unit tests (no database)
+        run: |
+          pip install -r requirements.txt
+          python -m pytest tests/test_config.py --noconftest -q
+
+      # Flex can't remote-build Python 3.14 yet, so the packages are built here (Linux, same Python)
+      # and shipped in .python_packages, where the Functions host looks for them.
+      - name: Install packages into the app folder
+        run: pip install -r requirements.txt --target .python_packages/lib/site-packages
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app
+          path: .
+          include-hidden-files: true
+          retention-days: 7
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: production   # required reviewers approve here
+      url: ${{ env.APP_URL }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: app
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ env.APP_NAME }}
+          package: .
+          sku: flexconsumption
+          remote-build: false
+          respect-funcignore: true   # .funcignore drops tests, scripts, seed, docs, .env
+
+      # An empty body must come back 422 from FastAPI: the app started and routing works.
+      # Reads no data, so it passes whatever is in the database.
+      - name: Smoke test
+        run: |
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o body.json -w "%{http_code}" -X POST -H "Content-Type: application/json" \
+              -d '{}' "$APP_URL/app/account/user-info" || true)
+            echo "attempt $i: HTTP $code"
+            if [ "$code" = "422" ]; then cat body.json; echo; exit 0; fi
+            sleep 20
+          done
+          echo "The app did not answer 422 after deploy"; cat body.json || true
+          exit 1
