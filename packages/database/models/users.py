@@ -37,6 +37,8 @@ class User(Base):
     user_register_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    # True once the user has opened the installed app (home-screen PWA). Metrics only.
+    app_installed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
 
     def __repr__(self) -> str:
         return f"<User {self.user_id} {self.user_name!r} {self.phone_number}>"

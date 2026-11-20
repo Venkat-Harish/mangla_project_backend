@@ -1,10 +1,9 @@
 import uuid
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel
 
-from app.schemas.common import KitchenOut, ORMModel
+from app.schemas.common import ImageOut, KitchenOut, ORMModel
 
 
 class KitchenSocietyAllIn(BaseModel):
@@ -35,7 +34,7 @@ class ActiveDishOut(ORMModel):
     dish_id: uuid.UUID
     dish_name: str
     dish_price: float
-    images: list[Any]
+    images: list[ImageOut]
     description: str | None
     active_order_flag: int
     order_close_time: datetime | None

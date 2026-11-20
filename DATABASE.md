@@ -7,12 +7,12 @@ Tables are created one at a time. Each table is defined as a SQLAlchemy ORM mode
 Code layout (`packages/database/`):
 - `db.py`: the single engine, `SessionLocal`, `get_session()` and `run_query(sql, params)`
 - `base.py`: the `Base` class all models inherit from
-- `ddl.py`: database-level SQL create_all can't express (alphanumeric-ID function and trigger, review edit-time trigger, RLS), hooked in with SQLAlchemy DDL events
-- `models/`: one ORM model file per table (`users.py`, `all_kitchens.py`, `all_dishes.py`, `orders.py`, `all_reviews.py`)
+- `ddl.py`: database-level SQL create_all can't express (alphanumeric-ID function and trigger, last-edited and soft-delete triggers, average_ratings row sync, RLS), hooked in with SQLAlchemy DDL events
+- `models/`: one ORM model file per table (`users.py`, `all_kitchens.py`, `all_dishes.py`, `orders.py`, `all_reviews.py`, `posts.py`, `average_ratings.py`)
 
 Import everything from the package: `from packages.database import get_session, User, Review`.
 
-To create any new tables: `Base.metadata.create_all(engine)`. It skips tables that already exist.
+To create any new tables: `python -m scripts.create_tables` (runs `Base.metadata.create_all`). It skips tables that already exist.
 
 Install deps: `pip install -r requirements.txt`
 
@@ -28,14 +28,17 @@ Install deps: `pip install -r requirements.txt`
 | 6 | [orders_audit](#orders_audit) | Request audit: one row per (request ID, step) of the order endpoints | 2026-11-17 |
 | 7 | [review_audit](#review_audit) | Request audit: one row per (request ID, step) of the review endpoints | 2026-11-17 |
 | 8 | [home_audit](#home_audit) | Request audit: one row per (request ID, step) of the home screen endpoints | 2026-11-17 |
+| 9 | [posts](#posts) | Kitchen posts (text + image/video URLs), soft-deletable | 2026-11-18 |
+| 10 | [average_ratings](#average_ratings) | Per-dish review count, star total and average | 2026-11-18 |
+| 11 | [posts_audit](#posts_audit) | Request audit: one row per (request ID, step) of the posts endpoints (none yet) | 2026-11-18 |
 
 ## Auto-generated alphanumeric IDs
 
-`all_kitchens.kitchen_alphanumeric_id` (`KIT-XXXXXXXX`), `orders.order_alphanumeric_id` (`ORD-XXXXXXXX`) and `all_reviews.review_alphanumeric_id` (`REV-XXXXXXXX`) are filled in by the database on insert. Leave them out when creating a row; the ORM reads the value back automatically.
+`all_kitchens.kitchen_alphanumeric_id` (`KIT-XXXXXXXX`), `orders.order_alphanumeric_id` (`ORD-XXXXXXXX`), `all_reviews.review_alphanumeric_id` (`REV-XXXXXXXX`) and `posts.post_alphanumeric_id` (`PST-XXXXXXXX`) are filled in by the database on insert. Leave them out when creating a row; the ORM reads the value back automatically.
 
 - `public.generate_alnum_code(prefix, len = 8)`: prefix + 8 random characters from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (no 0/O/1/I), about 1.1 trillion combinations. The randomness comes from `gen_random_uuid()`.
 - `public.set_alnum_id()`: BEFORE INSERT trigger function with arguments (column, prefix). If the column is empty, it generates a code and retries until the code isn't already in the table. The column's UNIQUE constraint is a final safety net.
-- Triggers: `all_kitchens_set_alnum_id`, `orders_set_alnum_id`, `all_reviews_set_alnum_id`.
+- Triggers: `all_kitchens_set_alnum_id`, `orders_set_alnum_id`, `all_reviews_set_alnum_id`, `posts_set_alnum_id`.
 - Full SQL is in `packages/database/ddl.py`.
 
 ---
@@ -60,6 +63,7 @@ Install deps: `pip install -r requirements.txt`
 | kitchen_register_time | timestamptz | yes | | ISO 8601 with time zone |
 | user_register_time | timestamptz | no | now() | ISO 8601 with time zone |
 | cart | jsonb | no | `'[]'` | Cart items: `[{"dish_id": "<uuid>", "portion_count": 2}, …]`; added 2026-11-17 |
+| app_installed | boolean | no | false | True once the user has opened the installed app (home-screen PWA); written by `/app/account/update-installed`. Metrics only, the app never reads it; added 2026-11-21 |
 
 **Keys / foreign keys:** PK `users_pkey` (user_id); unique `users_phone_number_key` (phone_number); FK `users_kitchen_id_fkey` (kitchen_id → all_kitchens), added 2026-11-16 with `ALTER TABLE` because users and all_kitchens reference each other.
 **Indexes:** the ones created by the PK and the unique constraint.
@@ -87,6 +91,8 @@ ALTER TABLE public.users ADD CONSTRAINT users_kitchen_id_fkey
 	FOREIGN KEY (kitchen_id) REFERENCES public.all_kitchens (kitchen_id);
 -- added 2026-11-17 (scripts/migrate_cart_and_active_order.py)
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS cart JSONB DEFAULT '[]'::jsonb NOT NULL;
+-- added 2026-11-21 (scripts/migrate_users_app_installed.py)
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS app_installed BOOLEAN DEFAULT false NOT NULL;
 ```
 
 ---
@@ -146,7 +152,7 @@ ALTER TABLE public.all_kitchens ENABLE ROW LEVEL SECURITY;
 | kitchen_id | uuid | no | | FK → all_kitchens |
 | dish_name | text | no | | |
 | dish_price | numeric(10,2) | no | | ≥ 0; exact decimal (Python `Decimal`) |
-| images | jsonb | no | `'[]'` | List of Supabase Storage URLs |
+| images | jsonb | no | `'[]'` | List of file paths in Storage bucket `dish_and_kitchen_photos_videos` (`dishes_pics/<kitchen_id>/<dish_id>/<file>`) |
 | description | text | yes | | |
 | active_order_flag | smallint | no | 0 | 0 = not taking orders, 1 = live, 2 = preorder. Was boolean until 2026-11-17 (false → 0, true → 1) |
 | order_close_time | timestamptz | yes | | ISO 8601 with time zone |
@@ -202,8 +208,9 @@ ALTER TABLE public.all_dishes ENABLE ROW LEVEL SECURITY;
 | order_status | text | no | | Free text |
 | payment_id | text | yes | | Payment gateway ID (e.g. `pay_...`) |
 | refund_flag | boolean | no | false | |
+| review_id | uuid | yes | | FK → all_reviews; the order's review, NULL = not reviewed yet. Set by `/orders/review` (one review per order). Added 2026-11-18 |
 
-**Keys / foreign keys:** PK `orders_pkey`; unique `orders_order_alphanumeric_id_key`; FKs `orders_kitchen_id_fkey`, `orders_dish_id_fkey`, `orders_user_id_fkey`; check `ck_orders_portion_count_positive`.
+**Keys / foreign keys:** PK `orders_pkey`; unique `orders_order_alphanumeric_id_key`, `orders_review_id_key`; FKs `orders_kitchen_id_fkey`, `orders_dish_id_fkey`, `orders_user_id_fkey`, `orders_review_id_fkey` (added with `ALTER TABLE` because orders and all_reviews reference each other; no ON DELETE action, so deleting a review must first clear `review_id` and call `record_rating_change`); check `ck_orders_portion_count_positive`.
 **Indexes:** `ix_orders_user_id_order_id` (user_id, order_id). user_id comes first so "all orders for a user" is fast; order_id alone is already indexed by the PK.
 **Trigger:** `orders_set_alnum_id`. **Row Level Security:** enabled, no policies.
 
@@ -230,13 +237,18 @@ CREATE INDEX ix_orders_user_id_order_id ON orders (user_id, order_id);
 CREATE TRIGGER orders_set_alnum_id BEFORE INSERT ON public.orders
 	FOR EACH ROW EXECUTE FUNCTION public.set_alnum_id('order_alphanumeric_id', 'ORD-');
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+-- added 2026-11-18 (scripts/migrate_orders_review_id.py)
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS review_id UUID;
+ALTER TABLE public.orders ADD CONSTRAINT orders_review_id_key UNIQUE (review_id);
+ALTER TABLE public.orders ADD CONSTRAINT orders_review_id_fkey
+	FOREIGN KEY (review_id) REFERENCES public.all_reviews (review_id);
 ```
 
 ---
 
 ## all_reviews
 
-**Purpose:** A user's review of a dish, tied to the order it came from. A user can review the same dish more than once.
+**Purpose:** A user's review of a dish, tied to the order it came from: one review per order (`/orders/review` creates it and sets `orders.review_id`). A user can review the same dish more than once, from different orders.
 **Model:** `packages/database/models/all_reviews.py` (`Review`)
 **Created:** 2026-11-16
 
@@ -245,18 +257,18 @@ ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 | review_id | uuid | no | gen_random_uuid() | Primary key |
 | review_alphanumeric_id | text | no | trigger | Unique, auto `REV-XXXXXXXX` |
 | dish_id | uuid | no | | FK → all_dishes |
-| order_id | uuid | no | | FK → orders |
+| order_id | uuid | no | | FK → orders; unique (one review per order, since 2026-11-18) |
 | user_id | uuid | no | | FK → users |
 | rating | numeric(2,1) | no | | Half stars 0.5–5.0 (Python `Decimal`) |
 | review_text | text | yes | | |
-| images | jsonb | no | `'[]'` | List of Supabase Storage URLs |
+| images | jsonb | no | `'[]'` | List of file paths in Storage bucket `reviews_photos_and_videos` (`users/<user_id>/<file>`) |
 | anonymous_flag | boolean | no | false | |
 | review_time | timestamptz | no | now() | ISO 8601 with time zone |
 | last_edited_time | timestamptz | yes | trigger | Set when rating/text/images/anonymous_flag change; null if never edited |
 | like_count | integer | no | 0 | ≥ 0 |
 | dislike_count | integer | no | 0 | ≥ 0 |
 
-**Keys / foreign keys:** PK `all_reviews_pkey`; unique `all_reviews_review_alphanumeric_id_key`; FKs `all_reviews_dish_id_fkey`, `all_reviews_order_id_fkey`, `all_reviews_user_id_fkey`; checks `ck_all_reviews_rating_half_stars`, `ck_all_reviews_like_count_nonnegative`, `ck_all_reviews_dislike_count_nonnegative`.
+**Keys / foreign keys:** PK `all_reviews_pkey`; unique `all_reviews_review_alphanumeric_id_key`, `all_reviews_order_id_key`; FKs `all_reviews_dish_id_fkey`, `all_reviews_order_id_fkey`, `all_reviews_user_id_fkey`; checks `ck_all_reviews_rating_half_stars`, `ck_all_reviews_like_count_nonnegative`, `ck_all_reviews_dislike_count_nonnegative`.
 **Indexes:** `ix_all_reviews_dish_id_review_id` (dish_id, review_id) and `ix_all_reviews_user_id_review_id` (user_id, review_id), which make "reviews for a dish" and "reviews by a user" fast.
 **Triggers:** `all_reviews_set_alnum_id`; `all_reviews_set_last_edited` (BEFORE UPDATE, function `public.set_review_last_edited()`). Like/dislike updates don't count as edits. **Row Level Security:** enabled, no policies.
 
@@ -291,16 +303,127 @@ CREATE TRIGGER all_reviews_set_alnum_id BEFORE INSERT ON public.all_reviews
 CREATE TRIGGER all_reviews_set_last_edited BEFORE UPDATE ON public.all_reviews
 	FOR EACH ROW EXECUTE FUNCTION public.set_review_last_edited();
 ALTER TABLE public.all_reviews ENABLE ROW LEVEL SECURITY;
+-- added 2026-11-18 (scripts/migrate_orders_review_id.py)
+ALTER TABLE public.all_reviews ADD CONSTRAINT all_reviews_order_id_key UNIQUE (order_id);
+```
+
+---
+
+## posts
+
+**Purpose:** Posts a kitchen publishes (text plus images/videos). Deleting is a soft delete: the row stays and is flagged.
+**Model:** `packages/database/models/posts.py` (`Post`)
+**Created:** 2026-11-18
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| post_id | uuid | no | gen_random_uuid() | Primary key |
+| post_alphanumeric_id | text | no | trigger | Unique, auto `PST-XXXXXXXX` |
+| kitchen_id | uuid | no | | FK → all_kitchens |
+| description | text | yes | | |
+| media_urls | jsonb | no | `'[]'` | List of Supabase Storage URLs (images and/or videos) |
+| posted_time | timestamptz | no | now() | ISO 8601 with time zone |
+| last_edited_time | timestamptz | yes | trigger | Set when description or media_urls change; null if never edited |
+| post_deleted_flag | boolean | no | false | Soft delete |
+| post_deleted_time | timestamptz | yes | trigger | Set when the flag turns on, cleared when it turns off |
+
+**Keys / foreign keys:** PK `posts_pkey`; unique `posts_post_alphanumeric_id_key`; FK `posts_kitchen_id_fkey` → all_kitchens; check `ck_posts_deleted_time_matches_flag` (deleted time is set exactly when the flag is on).
+**Indexes:** `ix_posts_kitchen_id_post_id` (kitchen_id, post_id) and `ix_posts_post_deleted_flag_post_id` (post_deleted_flag, post_id).
+**Triggers:**
+- `posts_set_alnum_id`
+- `posts_set_last_edited`: BEFORE UPDATE, `public.set_last_edited_on_change('description', 'media_urls')`. This generic function stamps `last_edited_time` when any column named in its arguments changes.
+- `posts_set_deleted_time`: BEFORE INSERT OR UPDATE, `public.set_post_deleted_time()`.
+
+Deleting or restoring a post doesn't count as an edit.
+**Row Level Security:** enabled, no policies.
+
+```sql
+CREATE TABLE posts (
+	post_id UUID DEFAULT gen_random_uuid() NOT NULL,
+	post_alphanumeric_id TEXT NOT NULL,
+	kitchen_id UUID NOT NULL,
+	description TEXT,
+	media_urls JSONB DEFAULT '[]'::jsonb NOT NULL,
+	posted_time TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+	last_edited_time TIMESTAMP WITH TIME ZONE,
+	post_deleted_flag BOOLEAN DEFAULT false NOT NULL,
+	post_deleted_time TIMESTAMP WITH TIME ZONE,
+	PRIMARY KEY (post_id),
+	CONSTRAINT ck_posts_deleted_time_matches_flag CHECK (post_deleted_flag = (post_deleted_time IS NOT NULL)),
+	UNIQUE (post_alphanumeric_id),
+	FOREIGN KEY(kitchen_id) REFERENCES all_kitchens (kitchen_id)
+);
+CREATE INDEX ix_posts_kitchen_id_post_id ON posts (kitchen_id, post_id);
+CREATE INDEX ix_posts_post_deleted_flag_post_id ON posts (post_deleted_flag, post_id);
+CREATE TRIGGER posts_set_alnum_id BEFORE INSERT ON public.posts
+	FOR EACH ROW EXECUTE FUNCTION public.set_alnum_id('post_alphanumeric_id', 'PST-');
+CREATE TRIGGER posts_set_last_edited BEFORE UPDATE ON public.posts
+	FOR EACH ROW EXECUTE FUNCTION public.set_last_edited_on_change('description', 'media_urls');
+CREATE TRIGGER posts_set_deleted_time BEFORE INSERT OR UPDATE ON public.posts
+	FOR EACH ROW EXECUTE FUNCTION public.set_post_deleted_time();
+ALTER TABLE public.posts ENABLE ROW LEVEL SECURITY;
+```
+
+---
+
+## average_ratings
+
+**Purpose:** One row per dish with its review count, star total and average rating.
+**Model:** `packages/database/models/average_ratings.py` (`AverageRating`)
+**Created:** 2026-11-18
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| dish_id | uuid | no | | Primary key; FK → all_dishes, ON DELETE CASCADE |
+| total_reviews_count | integer | no | 0 | ≥ 0 |
+| total_stars | numeric(10,1) | no | 0 | Sum of review ratings (half stars) |
+| average_rating | numeric(3,2) | yes | generated | `round(total_stars / total_reviews_count, 2)`; NULL when there are no reviews. Read-only. |
+| kitchen_id | uuid | no | | FK → all_kitchens; the dish's kitchen |
+
+**Who maintains what:**
+- **The backend** updates `total_reviews_count` and `total_stars` whenever a review is added, its rating changes, or it's deleted. For example, adding a 4.5 means `count + 1` and `stars + 4.5`.
+  - It does this only through `record_rating_change(session, dish_id, old_rating, new_rating)` in `app/services/ratings.py`, called in the same transaction as the review write. Pass `old_rating=None` for a new review and `new_rating=None` for a deleted one.
+  - The function is one atomic UPDATE, so concurrent requests can't lose updates.
+  - `/orders/review` calls it for each new review. `/review/edit` only edits text and images, so it doesn't. A future delete or re-rate endpoint must call it too.
+- **The database** computes `average_rating` from those two totals.
+- **The database** keeps exactly one row per dish:
+  - existing dishes were backfilled with 0 reviews
+  - trigger `all_dishes_sync_average_rating` (AFTER INSERT OR UPDATE OF kitchen_id on all_dishes, function `public.sync_average_rating_row()`) adds a row for every new dish and keeps `kitchen_id` in step with the dish
+  - deleting a dish deletes its row
+
+**Keys / foreign keys:** PK `average_ratings_pkey` (dish_id); FKs `average_ratings_dish_id_fkey` (ON DELETE CASCADE), `average_ratings_kitchen_id_fkey`; checks `ck_average_ratings_total_reviews_count_nonnegative` and `ck_average_ratings_total_stars_in_range` (total stars between 0.5× and 5× the review count, so 0 when there are no reviews).
+**Indexes:** `ix_average_ratings_kitchen_id_dish_id` (kitchen_id, dish_id). dish_id alone is already indexed by the PK.
+**Row Level Security:** enabled, no policies.
+
+```sql
+CREATE TABLE average_ratings (
+	dish_id UUID NOT NULL,
+	total_reviews_count INTEGER DEFAULT 0 NOT NULL,
+	total_stars NUMERIC(10, 1) DEFAULT 0 NOT NULL,
+	average_rating NUMERIC(3, 2) GENERATED ALWAYS AS (CASE WHEN total_reviews_count > 0 THEN round(total_stars / total_reviews_count, 2) END) STORED,
+	kitchen_id UUID NOT NULL,
+	PRIMARY KEY (dish_id),
+	CONSTRAINT ck_average_ratings_total_reviews_count_nonnegative CHECK (total_reviews_count >= 0),
+	CONSTRAINT ck_average_ratings_total_stars_in_range CHECK (total_stars >= 0.5 * total_reviews_count AND total_stars <= 5 * total_reviews_count),
+	FOREIGN KEY(dish_id) REFERENCES all_dishes (dish_id) ON DELETE CASCADE,
+	FOREIGN KEY(kitchen_id) REFERENCES all_kitchens (kitchen_id)
+);
+CREATE INDEX ix_average_ratings_kitchen_id_dish_id ON average_ratings (kitchen_id, dish_id);
+INSERT INTO public.average_ratings (dish_id, kitchen_id)
+	SELECT dish_id, kitchen_id FROM public.all_dishes ON CONFLICT (dish_id) DO NOTHING;
+CREATE TRIGGER all_dishes_sync_average_rating AFTER INSERT OR UPDATE OF kitchen_id ON public.all_dishes
+	FOR EACH ROW EXECUTE FUNCTION public.sync_average_rating_row();
+ALTER TABLE public.average_ratings ENABLE ROW LEVEL SECURITY;
 ```
 
 ---
 
 ## Audit tables
 
-`orders_audit`, `review_audit` and `home_audit` share one shape: one row per (request ID, step name), written by `packages/audit` (`from packages.audit import audit`; `audit.record(request_id, step_name, log_col)` inserts the row, `audit.update(request_id, step_name, error_column=..., log_col=...)` overwrites its logs, and `audit.write(...)` writes a finished step's whole row in one upsert). The request ID is the uuid the API creates for each request.
+`orders_audit`, `review_audit`, `home_audit` and `posts_audit` share one shape: one row per (request ID, step name), written by `packages/audit` (`from packages.audit import audit`; `audit.record(request_id, step_name, log_col)` inserts the row, `audit.update(request_id, step_name, error_column=..., log_col=...)` overwrites its logs, and `audit.write(...)` writes a finished step's whole row in one upsert). The request ID is the uuid the API creates for each request.
 
 - **How the API writes them:** `app/steps.py` (`audit_step`) writes one row when each audited step ends, with `audit.write`: `timestamp` = when the step started, `actual_log` = `<inputs as JSON> -> <result> (<ms> ms)`, and on failure `error_log` = `<Error>: <message>`. Rows go through a background thread and a small connection pool of their own (`audit.*` in `app.properties`).
-- **Step names → table:** `packages/audit/audit.json`. Each table lists its steps in `stepNameList`; the step name alone picks the table, and a step listed nowhere is not written. `auditflag: false` turns a table off. Today: `orders_audit` ← ordersUserAll, ordersUserKitchen, ordersUserSociety, ordersDetails; `home_audit` ← homeKitchenSocietyAll, homePinnedUpdate, homeKitchenLive, homeKitchenPreorder; `review_audit` ← reviewUserAll, reviewKitchen, reviewDish, reviewEdit, reviewLikeCounter.
+- **Step names → table:** `packages/audit/audit.json`. Each table lists its steps in `stepNameList`; the step name alone picks the table, and a step listed nowhere is not written. `auditflag: false` turns a table off. Today: `orders_audit` ← ordersUserAll, ordersUserKitchen, ordersUserSociety, ordersDetails, ordersReview; `home_audit` ← homeKitchenSocietyAll, homePinnedUpdate, homeKitchenLive, homeKitchenPreorder; `review_audit` ← reviewUserAll, reviewKitchen, reviewDish, reviewEdit, reviewLikeCounter; `posts_audit` ← none yet (no posts endpoints).
 - **Rolling size:** each table keeps at most `rollingSize` rows (10000), deleting the oldest whole requests past that. `record()` trims after every insert; `write()` trims on a table's first write and then every 100 writes, so a table can briefly hold up to 99 rows more.
 - **Definition:** `build_audit_table` in `packages/audit/audit_store.py` (Core table, no ORM model). The same definition creates the tables.
 - **Script:** `scripts/create_audit_tables.py`. Run from `mangla_backend/`: `python -m scripts.create_audit_tables`. It creates every table in `audit.json` that does not exist yet and enables RLS. Safe to re-run; existing tables are not changed.
@@ -401,6 +524,37 @@ ALTER TABLE public.home_audit ENABLE ROW LEVEL SECURITY;
 
 ---
 
+## posts_audit
+
+**Purpose:** Audit rows for the posts endpoints (there are none yet, so its `stepNameList` is empty): one row per request and step, with the step's log and error.
+**Definition:** `packages/audit/audit_store.py` (`build_audit_table`), created by `scripts/create_audit_tables.py`
+**Created:** 2026-11-18
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| request_id | uuid | no | | The request's uuid (from the API); PK part 1 |
+| timestamp | timestamptz | no | now() | When the step started (the API passes it; now() if not given); ISO 8601 with time zone |
+| step_name | text | no | | A step from `posts_audit.stepNameList` in `audit.json`; PK part 2 |
+| actual_log | text | yes | | The step's log (`log_col`), masked like the log files |
+| error_log | text | yes | | The step's error (`error_column`); null if it succeeded |
+
+**Keys / foreign keys:** PK `posts_audit_pkey` (request_id, step_name); no foreign keys.
+**Indexes:** only the PK. **Row Level Security:** enabled, no policies.
+
+```sql
+CREATE TABLE public.posts_audit (
+	request_id UUID NOT NULL,
+	timestamp TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+	step_name TEXT NOT NULL,
+	actual_log TEXT,
+	error_log TEXT,
+	CONSTRAINT posts_audit_pkey PRIMARY KEY (request_id, step_name)
+);
+ALTER TABLE public.posts_audit ENABLE ROW LEVEL SECURITY;
+```
+
+---
+
 ## Seed data
 
 **Pilot kitchens** (loaded 2026-11-16): the six pilot cooks, their kitchens and menus.
@@ -410,6 +564,14 @@ ALTER TABLE public.home_audit ENABLE ROW LEVEL SECURITY;
 - **Loads:** 7 users (Yummy Food has a second number, linked as `user_id2`), 6 kitchens, 99 dishes. Users get `kitchen_flag = true` and `kitchen_id`; society, block and flat are NULL until known. Dishes have `images = []` and `active_order_flag = 0`.
 - **Re-running** is safe: users are matched by phone, kitchens by (name, main owner), dishes by (kitchen, name). Existing rows are updated, nothing is duplicated. One transaction; any error rolls everything back.
 - To refresh after editing the prototype's menus, re-export the JSON from `prototype/` (Node import of `src/data/cooks.js`) and run the script again. Dishes removed from the JSON are not deleted from the table.
+
+**Demo data** (for the EAT-mode screens of the frontend; not for production): a demo buyer, a demo society and a few open dishes and orders on top of the pilot kitchens.
+
+- **Script:** `scripts/seed_demo_eat.py`. Run from `mangla_backend/` after the pilot seed: `python -m scripts.seed_demo_eat` (add `--dry-run` to do everything, print the stats and roll back). It prints the demo `user_id` (the frontend's `VITE_DEMO_USER_ID`) and `DEMO_SOCIETY_ID`.
+- **Demo society:** `DEMO_SOCIETY_ID = uuid5(NAMESPACE_DNS, "demo-society.mangla")`, so it is the same uuid on every run and every machine.
+- **Changes:** upserts the user with phone `+910000000001` ("Demo Buyer", demo society, block `D`, flat `D-704`, `kitchen_flag = false`); sets the pilot kitchens' `society_id` to the demo society only where it is NULL or already the demo society (a kitchen in a real society, and its dishes, are left alone); with kitchens and dishes sorted by name, opens the first 2 dishes of kitchens 1 and 2 as live (`active_order_flag` 1, closes in 3 h, pickup in 1 h, 10 portions) and the first 2 of kitchen 3 as preorder (flag 2, closes in 20 h, pickup in 26 h, 8 portions); upserts 4 orders for the demo buyer keyed by `payment_id` `demo-seed-1`..`demo-seed-4` (2 `delivered`, 1 `accepted`, 1 `ready`).
+- **Re-running** is safe and refreshes the times, which are relative to the run (live dishes close 3 h later, so re-run it before a demo). An order that has been reviewed (`review_id` set) is never modified. One transaction.
+- **Removing it** (before production): `python -m scripts.remove_demo_eat` (`--dry-run` supported). It deletes the demo buyer with all their orders and reviews (taking those ratings back out of `average_ratings`), closes the 6 demo dishes again (flag 0, times and portions NULL; only in kitchens still in the demo society) and sets `society_id` back to NULL on every kitchen and user in the demo society. Pilot cooks, kitchens and dishes stay; audit rows are left to roll off; review photos uploaded from the demo frontend are printed, not deleted from Storage.
 
 ---
 

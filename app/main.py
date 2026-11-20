@@ -4,6 +4,7 @@ Run from mangla_backend/:  python -m app   (or: uvicorn app.main:app --reload)
 """
 
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 
@@ -15,13 +16,24 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException  # also catches Starlette's own 404/405
 
 from app.config import get_settings
-from app.errors import NotFoundError
+from app.errors import ConflictError, InvalidInputError, NotFoundError
 from app.logging_setup import configure_logging
 from app.request_id import RequestIdMiddleware, UnhandledErrorMiddleware, get_request_id
-from app.routers import account, cart, home, orders, reviews
+from app.routers import account, cart, home, media, orders, reviews
 from app.steps import audit_writer
+from packages.storage import StorageError
 
 logger = logging.getLogger(__name__)
+
+
+class AsciiJSONResponse(JSONResponse):
+    """JSON with non-ASCII characters escaped (as \\uXXXX). Error bodies can echo the client's own
+    text (a validation error's 'input', a path in a 422 message), and text with a lone surrogate
+    would make the default UTF-8 rendering fail and turn the error into a 500."""
+
+    def render(self, content) -> bytes:
+        return json.dumps(content, ensure_ascii=True, allow_nan=False,
+                          separators=(",", ":")).encode("ascii")
 
 
 @asynccontextmanager
@@ -40,6 +52,8 @@ def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings)
     app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
+    if not settings.review_allowed_order_statuses:
+        logger.warning("review.allowed_order_statuses is empty: /orders/review will refuse every order")
 
     # add_middleware wraps: the last added runs first. Order per request:
     # RequestIdMiddleware (ID before anything else) -> CORSMiddleware -> UnhandledErrorMiddleware
@@ -57,7 +71,7 @@ def create_app() -> FastAPI:
     @app.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException) -> JSONResponse:
         logger.warning("HTTP %d: %s", exc.status_code, exc.detail)
-        return JSONResponse(
+        return AsciiJSONResponse(
             status_code=exc.status_code,
             content={"detail": exc.detail, "request_id": get_request_id()},
             headers=exc.headers,
@@ -65,8 +79,25 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(NotFoundError)
     async def not_found(request: Request, exc: NotFoundError) -> JSONResponse:
-        return JSONResponse(status_code=404,
+        return AsciiJSONResponse(status_code=404,
                             content={"detail": exc.detail, "request_id": get_request_id()})
+
+    @app.exception_handler(ConflictError)
+    async def conflict(request: Request, exc: ConflictError) -> JSONResponse:
+        return AsciiJSONResponse(status_code=409,
+                            content={"detail": exc.detail, "request_id": get_request_id()})
+
+    @app.exception_handler(InvalidInputError)
+    async def invalid_input(request: Request, exc: InvalidInputError) -> JSONResponse:
+        return AsciiJSONResponse(status_code=422,
+                            content={"detail": exc.detail, "request_id": get_request_id()})
+
+    @app.exception_handler(StorageError)
+    async def storage_error(request: Request, exc: StorageError) -> JSONResponse:
+        logger.error("Storage error: %s", exc)
+        return AsciiJSONResponse(status_code=502,
+                            content={"detail": "File storage is unavailable, try again",
+                                     "request_id": get_request_id()})
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
@@ -80,9 +111,9 @@ def create_app() -> FastAPI:
             {"detail": errors, "request_id": get_request_id()},
             custom_encoder={bytes: lambda b: b.decode("utf-8", "replace")},
         )
-        return JSONResponse(status_code=422, content=content)
+        return AsciiJSONResponse(status_code=422, content=content)
 
-    for module in (orders, home, cart, account, reviews):
+    for module in (orders, home, cart, account, reviews, media):
         app.include_router(module.router, prefix=settings.api_prefix)
     logger.info("Routes mounted under %s", settings.api_prefix or "/")
     return app

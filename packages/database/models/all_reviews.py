@@ -37,8 +37,9 @@ class Review(Base):
     dish_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("all_dishes.dish_id"), nullable=False
     )
+    # One review per order (unique all_reviews_order_id_key); orders.review_id points back here
     order_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("orders.order_id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("orders.order_id"), nullable=False, unique=True
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
@@ -46,7 +47,7 @@ class Review(Base):
     # Half stars: 0.5, 1.0, 1.5 ... 5.0
     rating: Mapped[Decimal] = mapped_column(Numeric(2, 1), nullable=False)
     review_text: Mapped[Optional[str]] = mapped_column(Text)
-    # List of Supabase Storage URLs
+    # File paths in Storage bucket reviews_photos_and_videos: users/<user_id>/<name>.jpg
     images: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )

@@ -4,8 +4,9 @@ from sqlalchemy.orm import Session
 from app.deps import get_db
 from app.schemas.common import UserIdIn
 from app.schemas.orders import (
-    OrderIdIn, OrderListItem, OrderOut, UserKitchenOrdersIn, UserSocietyOrdersIn,
+    OrderIdIn, OrderListItem, OrderOut, OrderReviewIn, UserKitchenOrdersIn, UserSocietyOrdersIn,
 )
+from app.schemas.reviews import ReviewOut
 from app.services import orders as service
 
 router = APIRouter(prefix="/orders", tags=["orders"])
@@ -33,3 +34,10 @@ def user_society(body: UserSocietyOrdersIn, db: Session = Depends(get_db)):
 def details(body: OrderIdIn, db: Session = Depends(get_db)):
     """Every column of one order."""
     return service.details(db, body.order_id)
+
+
+@router.post("/review", response_model=ReviewOut, status_code=201)
+def review(body: OrderReviewIn, db: Session = Depends(get_db)):
+    """Review the order (once): rating, description, images; returns the new review."""
+    return service.review(db, body.order_id, body.rating, body.description, body.images,
+                          body.anonymous_flag)

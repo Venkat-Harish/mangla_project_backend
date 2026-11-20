@@ -1,11 +1,12 @@
 """Tests run against the real Supabase database inside one transaction per test that is rolled
 back afterwards, so nothing they insert or change is kept (services' commit() only releases a
 savepoint). Audit rows are written on their own connection, so auditing is off in tests except in
-test_audit.py, which deletes its rows. Run from mangla_backend/:  python -m pytest -q
+test_audit.py, which deletes its rows. Supabase Storage is faked (fake_storage) except in tests
+marked live_storage. Run from mangla_backend/:  python -m pytest -q
 """
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -15,8 +16,40 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db
 from app.main import app
+from app.services.ratings import record_rating_change
 from app.steps import audit_writer
 from packages.database import Dish, Kitchen, Order, Review, User, engine
+from packages.storage import client as storage_client
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "live_storage: calls the real Supabase Storage")
+
+
+def signed(bucket: str, path: str) -> dict:
+    """An image as the endpoints return it under fake_storage."""
+    return {"path": path, "url": f"https://signed/{bucket}/{path}"}
+
+
+@dataclass
+class FakeStorage:
+    uploaded: set[str] = field(default_factory=set)  # paths existing() reports
+
+
+@pytest.fixture(autouse=True)
+def fake_storage(request, monkeypatch) -> FakeStorage:
+    """Storage calls answered in memory: every path signs, upload URLs are fake, and only the
+    paths a test adds to .uploaded exist."""
+    fake = FakeStorage()
+    if request.node.get_closest_marker("live_storage"):
+        return fake
+    monkeypatch.setattr(storage_client, "sign", lambda bucket, paths, expires_in: {
+        p: f"https://signed/{bucket}/{p}" for p in paths})
+    monkeypatch.setattr(storage_client, "upload_url",
+                        lambda bucket, path: f"https://upload/{bucket}/{path}?token=t")
+    monkeypatch.setattr(storage_client, "existing", lambda bucket, folder: {
+        p for p in fake.uploaded if p.startswith(folder) and "/" not in p[len(folder):]})
+    return fake
 
 
 @pytest.fixture(autouse=True)
@@ -116,7 +149,7 @@ def data(db) -> Data:
 
     review_anon = Review(dish_id=dish_live.dish_id, order_id=order_old.order_id,
                          user_id=customer.user_id, rating=Decimal("4.5"), review_text="Tasty",
-                         images=["https://img/1.jpg"], anonymous_flag=True,
+                         images=[f"users/{customer.user_id}/1.jpg"], anonymous_flag=True,
                          review_time=now - timedelta(hours=2))
     review_named = Review(dish_id=dish_pre.dish_id, order_id=order_new.order_id,
                           user_id=other_user.user_id, rating=Decimal("3.0"), review_text="Okay",
@@ -128,6 +161,14 @@ def data(db) -> Data:
         {"dish_id": str(dish_live.dish_id), "portion_count": 2},
         {"dish_id": str(uuid.uuid4()), "portion_count": 1},
     ]
+    db.flush()
+    # Each review's order points back at it and the dishes' average_ratings totals count both
+    # reviews, as after /orders/review (which would also make the reviewer the order's user;
+    # review_named deliberately differs). order_b stays unreviewed.
+    order_old.review_id = review_anon.review_id
+    order_new.review_id = review_named.review_id
+    record_rating_change(db, dish_live.dish_id, None, review_anon.rating)
+    record_rating_change(db, dish_pre.dish_id, None, review_named.rating)
     db.flush()
     for obj in (order_old, order_new, order_b, review_anon, review_named,
                 kitchen_a1, kitchen_a2, kitchen_b):

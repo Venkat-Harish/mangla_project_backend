@@ -10,9 +10,11 @@ from collections.abc import Collection
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.errors import NotFoundError
 from app.schemas.home import ActiveDishOut, ActiveKitchenOut, HomeKitchenOut, PinnedOut
 from app.steps import audit_step
+from packages import storage
 from packages.database import Dish, Kitchen, User
 
 logger = logging.getLogger(__name__)
@@ -128,12 +130,16 @@ def _kitchens_with_active_dishes(
         .where(Kitchen.society_id == society_id, Dish.active_order_flag.in_(list(flags)))
         .order_by(Kitchen.kitchen_name, Kitchen.kitchen_id, Dish.dish_name, Dish.dish_id)
     ).all()
+    # every dish's images signed in one Storage call
+    signed = storage.signed_images("dish", [dish.images for _, dish in rows],
+                                   get_settings().storage_signed_url_seconds)
     kitchens: dict[uuid.UUID, ActiveKitchenOut] = {}
-    for kitchen, dish in rows:
+    for (kitchen, dish), images in zip(rows, signed):
         entry = kitchens.get(kitchen.kitchen_id)
         if entry is None:
             entry = kitchens[kitchen.kitchen_id] = ActiveKitchenOut(**_kitchen_fields(kitchen), dishes=[])
-        entry.dishes.append(ActiveDishOut.model_validate(dish))
+        fields = {name: getattr(dish, name) for name in ActiveDishOut.model_fields if name != "images"}
+        entry.dishes.append(ActiveDishOut(**fields, images=images))
     return list(kitchens.values())
 
 

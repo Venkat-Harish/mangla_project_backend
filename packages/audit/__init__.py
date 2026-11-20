@@ -15,7 +15,7 @@ name (a unique name for one process); this package only records the step and upd
             audit.update(request_id, step_name, error_column=f"{type(exc).__name__}: {exc}")
             raise
 
-- audit.json maps each table (orders_audit, review_audit, home_audit) to its stepNameList,
+- audit.json maps each table (orders_audit, review_audit, home_audit, posts_audit) to its stepNameList,
   auditflag and rollingSize; the step name alone picks the table (audit_config.py). A step whose
   table has auditflag false writes nothing, and a step listed in no table logs a warning and writes
   nothing.

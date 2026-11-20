@@ -44,6 +44,14 @@ class Order(Base):
     # Payment gateway ID (e.g. "pay_..."), so text rather than uuid
     payment_id: Mapped[Optional[str]] = mapped_column(Text)
     refund_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
+    # The order's review; NULL = not reviewed yet (set by /orders/review, one review per order).
+    # orders <-> all_reviews point at each other, so this FK is added with ALTER (use_alter).
+    # No ON DELETE action: deleting a review must clear this and fix average_ratings itself.
+    review_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("all_reviews.review_id", use_alter=True, name="orders_review_id_fkey"),
+        unique=True,
+    )
 
     def __repr__(self) -> str:
         return f"<Order {self.order_alphanumeric_id} {self.order_status!r}>"
