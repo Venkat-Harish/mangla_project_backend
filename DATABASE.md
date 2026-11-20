@@ -562,6 +562,14 @@ ALTER TABLE public.posts_audit ENABLE ROW LEVEL SECURITY;
 - **Re-running** is safe: users are matched by phone, kitchens by (name, main owner), dishes by (kitchen, name). Existing rows are updated, nothing is duplicated. One transaction; any error rolls everything back.
 - To refresh after editing the prototype's menus, re-export the JSON from `prototype/` (Node import of `src/data/cooks.js`) and run the script again. Dishes removed from the JSON are not deleted from the table.
 
+**Demo data** (for the EAT-mode screens of the frontend; not for production): a demo buyer, a demo society and a few open dishes and orders on top of the pilot kitchens.
+
+- **Script:** `scripts/seed_demo_eat.py`. Run from `mangla_backend/` after the pilot seed: `python -m scripts.seed_demo_eat` (add `--dry-run` to do everything, print the stats and roll back). It prints the demo `user_id` (the frontend's `VITE_DEMO_USER_ID`) and `DEMO_SOCIETY_ID`.
+- **Demo society:** `DEMO_SOCIETY_ID = uuid5(NAMESPACE_DNS, "demo-society.mangla")`, so it is the same uuid on every run and every machine.
+- **Changes:** upserts the user with phone `+910000000001` ("Demo Buyer", demo society, block `D`, flat `D-704`, `kitchen_flag = false`); sets the pilot kitchens' `society_id` to the demo society only where it is NULL or already the demo society (a kitchen in a real society, and its dishes, are left alone); with kitchens and dishes sorted by name, opens the first 2 dishes of kitchens 1 and 2 as live (`active_order_flag` 1, closes in 3 h, pickup in 1 h, 10 portions) and the first 2 of kitchen 3 as preorder (flag 2, closes in 20 h, pickup in 26 h, 8 portions); upserts 4 orders for the demo buyer keyed by `payment_id` `demo-seed-1`..`demo-seed-4` (2 `delivered`, 1 `accepted`, 1 `ready`).
+- **Re-running** is safe and refreshes the times, which are relative to the run (live dishes close 3 h later, so re-run it before a demo). An order that has been reviewed (`review_id` set) is never modified. One transaction.
+- **Removing it** (before production): `python -m scripts.remove_demo_eat` (`--dry-run` supported). It deletes the demo buyer with all their orders and reviews (taking those ratings back out of `average_ratings`), closes the 6 demo dishes again (flag 0, times and portions NULL; only in kitchens still in the demo society) and sets `society_id` back to NULL on every kitchen and user in the demo society. Pilot cooks, kitchens and dishes stay; audit rows are left to roll off; review photos uploaded from the demo frontend are printed, not deleted from Storage.
+
 ---
 
 <!--
