@@ -12,7 +12,7 @@ from app.main import app
 
 def test_routes_are_post_under_app_prefix():
     routes = {(tuple(r.methods), r.path) for r in app.routes if r.path.startswith("/app/")}
-    assert len(routes) == 17
+    assert len(routes) == 18
     assert all(methods == ("POST",) for methods, _ in routes)
 
 

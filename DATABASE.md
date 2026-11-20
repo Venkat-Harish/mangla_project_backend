@@ -63,6 +63,7 @@ Install deps: `pip install -r requirements.txt`
 | kitchen_register_time | timestamptz | yes | | ISO 8601 with time zone |
 | user_register_time | timestamptz | no | now() | ISO 8601 with time zone |
 | cart | jsonb | no | `'[]'` | Cart items: `[{"dish_id": "<uuid>", "portion_count": 2}, …]`; added 2026-11-17 |
+| app_installed | boolean | no | false | True once the user has opened the installed app (home-screen PWA); written by `/app/account/update-installed`. Metrics only, the app never reads it; added 2026-11-21 |
 
 **Keys / foreign keys:** PK `users_pkey` (user_id); unique `users_phone_number_key` (phone_number); FK `users_kitchen_id_fkey` (kitchen_id → all_kitchens), added 2026-11-16 with `ALTER TABLE` because users and all_kitchens reference each other.
 **Indexes:** the ones created by the PK and the unique constraint.
@@ -90,6 +91,8 @@ ALTER TABLE public.users ADD CONSTRAINT users_kitchen_id_fkey
 	FOREIGN KEY (kitchen_id) REFERENCES public.all_kitchens (kitchen_id);
 -- added 2026-11-17 (scripts/migrate_cart_and_active_order.py)
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS cart JSONB DEFAULT '[]'::jsonb NOT NULL;
+-- added 2026-11-21 (scripts/migrate_users_app_installed.py)
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS app_installed BOOLEAN DEFAULT false NOT NULL;
 ```
 
 ---

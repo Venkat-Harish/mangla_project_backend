@@ -1,5 +1,6 @@
 import uuid
 
+from packages.database import User
 from tests.conftest import signed
 
 
@@ -41,4 +42,21 @@ def test_user_info(client, data):
     assert len(body["cart"]) == 2
     assert set(body) == {"user_id", "phone_number", "user_name", "society_id", "block_number",
                          "flat_number", "kitchen_flag", "kitchen_id", "pinned_kitchen", "cart",
-                         "kitchen_register_time", "user_register_time"}
+                         "kitchen_register_time", "user_register_time", "app_installed"}
+    assert body["app_installed"] is False
+
+
+def test_update_installed(client, data, db):
+    user = str(data.customer.user_id)
+    r = client.post("/app/account/update-installed", json={"user_id": user})
+    assert r.status_code == 200 and r.json() == {"user_id": user, "app_installed": True}
+    r = client.post("/app/account/update-installed", json={"user_id": user, "installed": True})
+    assert r.json()["app_installed"] is True  # setting it twice is harmless
+    db.expire_all()
+    assert db.get(User, data.customer.user_id).app_installed is True
+    assert client.post("/app/account/user-info", json={"user_id": user}).json()["app_installed"] is True
+
+    r = client.post("/app/account/update-installed", json={"user_id": user, "installed": False})
+    assert r.json()["app_installed"] is False
+    r = client.post("/app/account/update-installed", json={"user_id": str(uuid.uuid4())})
+    assert r.status_code == 404

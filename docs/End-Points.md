@@ -23,6 +23,7 @@ Photos and videos live in private Supabase Storage buckets ([buckets.md](../buck
 | Endpoint | Input | Output | Description |
 |---|---|---|---|
 | `/account/user-info` | `user_id` | User (all user columns) | Everything stored about the user. |
+| `/account/update-installed` | `user_id`, `installed?` (default `true`) | `{user_id, app_installed}` | Record whether the user has installed the app (home-screen PWA). Metrics only. `404` unknown user. |
 
 ## Cart
 | Endpoint | Input | Output | Description |
